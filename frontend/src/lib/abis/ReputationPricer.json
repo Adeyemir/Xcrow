@@ -1,0 +1,6 @@
+[
+  {"type":"function","name":"getQuote","inputs":[{"name":"agentId","type":"uint256"},{"name":"protocolFeeBps","type":"uint256"}],"outputs":[{"name":"quote","type":"tuple","components":[{"name":"agentId","type":"uint256"},{"name":"baseRate","type":"uint256"},{"name":"effectiveRate","type":"uint256"},{"name":"reputationScore","type":"uint256"},{"name":"multiplier","type":"uint256"},{"name":"platformFee","type":"uint256"},{"name":"totalCost","type":"uint256"},{"name":"quotedAt","type":"uint256"}]}],"stateMutability":"view"},
+  {"type":"function","name":"getReputationMultiplier","inputs":[{"name":"agentId","type":"uint256"}],"outputs":[{"name":"score","type":"uint256"},{"name":"multiplierBps","type":"uint256"}],"stateMutability":"view"},
+  {"type":"function","name":"agentBaseRates","inputs":[{"name":"agentId","type":"uint256"}],"outputs":[{"name":"","type":"uint256"}],"stateMutability":"view"},
+  {"type":"function","name":"setBaseRate","inputs":[{"name":"agentId","type":"uint256"},{"name":"baseRate","type":"uint256"}],"outputs":[],"stateMutability":"nonpayable"}
+]

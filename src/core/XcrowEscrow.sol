@@ -1,0 +1,355 @@
+// SPDX-License-Identifier: GPL-3.0
+pragma solidity ^0.8.20;
+
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+
+import {XcrowTypes} from "../libraries/XcrowTypes.sol";
+import {IXcrowEscrow} from "../interfaces/IXcrowEscrow.sol";
+import {IERC8004Identity} from "../interfaces/IERC8004Identity.sol";
+
+/// @title XcrowEscrow
+/// @notice USDC escrow for ERC-8004 agent jobs
+/// @dev Holds USDC during task execution, releases on completion
+contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
+    using SafeERC20 for IERC20;
+
+    // --- State ---
+    IERC20 public immutable usdc;
+    IERC8004Identity public immutable identityRegistry;
+
+    uint256 public nextJobId;
+    uint256 public protocolFeeBps; // Basis points (250 = 2.5%)
+    uint256 public constant MAX_FEE_BPS = 1000; // 10% max
+    address public treasury;
+    uint256 public disputeTimeout; // Seconds before auto-refund on dispute
+
+    mapping(uint256 => XcrowTypes.Job) public jobs;
+    mapping(address => uint256[]) public clientJobs;
+    mapping(uint256 => uint256[]) public agentJobs; // agentId => jobIds
+
+    // Accumulated protocol fees ready for withdrawal
+    uint256 public accumulatedFees;
+
+    // --- Constructor ---
+    constructor(
+        address _usdc,
+        address _identityRegistry,
+        address _treasury,
+        uint256 _protocolFeeBps,
+        uint256 _disputeTimeout
+    ) Ownable(msg.sender) {
+        require(_usdc != address(0), "Invalid USDC address");
+        require(_identityRegistry != address(0), "Invalid registry");
+        require(_treasury != address(0), "Invalid treasury");
+        require(_protocolFeeBps <= MAX_FEE_BPS, "Fee too high");
+
+        usdc = IERC20(_usdc);
+        identityRegistry = IERC8004Identity(_identityRegistry);
+        treasury = _treasury;
+        protocolFeeBps = _protocolFeeBps;
+        disputeTimeout = _disputeTimeout;
+        nextJobId = 1;
+    }
+
+    // --- Core Functions ---
+
+    /// @inheritdoc IXcrowEscrow
+    function createJob(
+        uint256 agentId,
+        uint32 agentChainId,
+        uint256 amount,
+        bytes32 taskHash,
+        uint256 deadline
+    ) external nonReentrant whenNotPaused returns (uint256 jobId) {
+        require(amount > 0, "Amount must be > 0");
+        require(deadline > block.timestamp, "Deadline must be future");
+        require(taskHash != bytes32(0), "Task hash required");
+
+        // Resolve agent's payment wallet from ERC-8004
+        address agentWallet = identityRegistry.getAgentWallet(agentId);
+        require(agentWallet != address(0), "Agent has no wallet set");
+        require(agentWallet != msg.sender, "Cannot hire yourself");
+
+        // Calculate fee
+        uint256 platformFee = (amount * protocolFeeBps) / 10000;
+
+        jobId = nextJobId++;
+
+        jobs[jobId] = XcrowTypes.Job({
+            jobId: jobId,
+            agentId: agentId,
+            agentChainId: agentChainId,
+            client: msg.sender,
+            agentWallet: agentWallet,
+            amount: amount,
+            platformFee: platformFee,
+            taskHash: taskHash,
+            deadline: deadline,
+            createdAt: block.timestamp,
+            settledAt: 0,
+            status: XcrowTypes.JobStatus.Created,
+            isCrossChain: false,
+            destinationDomain: 0
+        });
+
+        clientJobs[msg.sender].push(jobId);
+        agentJobs[agentId].push(jobId);
+
+        // Transfer USDC from client to escrow
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+
+        emit JobCreated(jobId, agentId, msg.sender, amount);
+    }
+
+    /// @notice Create a cross-chain escrow job (agent will be paid on destination chain)
+    function createCrossChainJob(
+        uint256 agentId,
+        uint32 agentChainId,
+        uint256 amount,
+        bytes32 taskHash,
+        uint256 deadline,
+        uint32 destinationDomain
+    ) external nonReentrant whenNotPaused returns (uint256 jobId) {
+        require(amount > 0, "Amount must be > 0");
+        require(deadline > block.timestamp, "Deadline must be in future");
+        require(taskHash != bytes32(0), "Task hash required");
+        require(destinationDomain > 0, "Invalid destination domain");
+
+        address agentWallet = identityRegistry.getAgentWallet(agentId);
+        require(agentWallet != address(0), "Agent has no wallet set");
+        require(agentWallet != msg.sender, "Cannot hire yourself");
+
+        uint256 platformFee = (amount * protocolFeeBps) / 10000;
+
+        jobId = nextJobId++;
+
+        jobs[jobId] = XcrowTypes.Job({
+            jobId: jobId,
+            agentId: agentId,
+            agentChainId: agentChainId,
+            client: msg.sender,
+            agentWallet: agentWallet,
+            amount: amount,
+            platformFee: platformFee,
+            taskHash: taskHash,
+            deadline: deadline,
+            createdAt: block.timestamp,
+            settledAt: 0,
+            status: XcrowTypes.JobStatus.Created,
+            isCrossChain: true,
+            destinationDomain: destinationDomain
+        });
+
+        clientJobs[msg.sender].push(jobId);
+        agentJobs[agentId].push(jobId);
+
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+
+        emit JobCreated(jobId, agentId, msg.sender, amount);
+    }
+
+    /// @inheritdoc IXcrowEscrow
+    function acceptJob(uint256 jobId) external nonReentrant {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(job.status == XcrowTypes.JobStatus.Created, "Job not in Created state");
+        require(msg.sender == job.agentWallet, "Only agent can accept");
+        require(block.timestamp < job.deadline, "Job expired");
+
+        job.status = XcrowTypes.JobStatus.Accepted;
+        emit JobAccepted(jobId, job.agentId);
+    }
+
+    /// @inheritdoc IXcrowEscrow
+    function startJob(uint256 jobId) external nonReentrant {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(job.status == XcrowTypes.JobStatus.Accepted, "Job not Accepted");
+        require(msg.sender == job.agentWallet, "Only agent can start");
+
+        job.status = XcrowTypes.JobStatus.InProgress;
+        emit JobStarted(jobId);
+    }
+
+    /// @inheritdoc IXcrowEscrow
+    function completeJob(uint256 jobId) external nonReentrant {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(
+            job.status == XcrowTypes.JobStatus.Accepted ||
+            job.status == XcrowTypes.JobStatus.InProgress,
+            "Job not in progress"
+        );
+        require(msg.sender == job.agentWallet, "Only agent can complete");
+
+        job.status = XcrowTypes.JobStatus.Completed;
+        emit JobCompleted(jobId);
+    }
+
+    /// @inheritdoc IXcrowEscrow
+    function settleJob(uint256 jobId) external nonReentrant {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(job.status == XcrowTypes.JobStatus.Completed, "Job not completed");
+        require(msg.sender == job.client, "Only client can settle");
+
+        uint256 agentPayout = job.amount - job.platformFee;
+
+        job.status = XcrowTypes.JobStatus.Settled;
+        job.settledAt = block.timestamp;
+
+        // Accumulate protocol fees
+        accumulatedFees += job.platformFee;
+
+        // Pay the agent
+        usdc.safeTransfer(job.agentWallet, agentPayout);
+
+        emit JobSettled(jobId, agentPayout, job.platformFee);
+    }
+
+    /// @inheritdoc IXcrowEscrow
+    function disputeJob(uint256 jobId, string calldata reason) external nonReentrant {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(
+            job.status == XcrowTypes.JobStatus.Accepted ||
+            job.status == XcrowTypes.JobStatus.InProgress ||
+            job.status == XcrowTypes.JobStatus.Completed,
+            "Cannot dispute in current state"
+        );
+        require(
+            msg.sender == job.client || msg.sender == job.agentWallet,
+            "Only client or agent can dispute"
+        );
+
+        job.status = XcrowTypes.JobStatus.Disputed;
+        emit JobDisputed(jobId, msg.sender, reason);
+    }
+
+    /// @inheritdoc IXcrowEscrow
+    function cancelJob(uint256 jobId) external nonReentrant {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(job.status == XcrowTypes.JobStatus.Created, "Can only cancel Created jobs");
+        require(msg.sender == job.client, "Only client can cancel");
+
+        job.status = XcrowTypes.JobStatus.Cancelled;
+
+        // Full refund
+        usdc.safeTransfer(job.client, job.amount);
+
+        emit JobCancelled(jobId);
+    }
+
+    /// @notice Resolve a disputed job after the dispute timeout has elapsed
+    /// @dev Auto-refunds the client if no resolution after disputeTimeout seconds
+    function resolveDispute(uint256 jobId) external nonReentrant {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(job.status == XcrowTypes.JobStatus.Disputed, "Job not disputed");
+        require(
+            msg.sender == job.client || msg.sender == job.agentWallet || msg.sender == owner(),
+            "Not authorized to resolve"
+        );
+
+        // After disputeTimeout, anyone authorized can trigger auto-refund
+        require(block.timestamp > job.createdAt + disputeTimeout, "Dispute timeout not elapsed");
+
+        job.status = XcrowTypes.JobStatus.Refunded;
+
+        // Full refund to client
+        usdc.safeTransfer(job.client, job.amount);
+
+        emit JobRefunded(jobId, job.amount);
+    }
+
+    /// @notice Owner can resolve a dispute in favor of agent or client before timeout
+    /// @param jobId Job ID
+    /// @param favorAgent If true, pay agent; if false, refund client
+    function resolveDisputeByOwner(uint256 jobId, bool favorAgent) external nonReentrant onlyOwner {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(job.status == XcrowTypes.JobStatus.Disputed, "Job not disputed");
+
+        if (favorAgent) {
+            uint256 agentPayout = job.amount - job.platformFee;
+            job.status = XcrowTypes.JobStatus.Settled;
+            job.settledAt = block.timestamp;
+            accumulatedFees += job.platformFee;
+            usdc.safeTransfer(job.agentWallet, agentPayout);
+            emit JobSettled(jobId, agentPayout, job.platformFee);
+        } else {
+            job.status = XcrowTypes.JobStatus.Refunded;
+            usdc.safeTransfer(job.client, job.amount);
+            emit JobRefunded(jobId, job.amount);
+        }
+    }
+
+    /// @inheritdoc IXcrowEscrow
+    function refundExpiredJob(uint256 jobId) external nonReentrant {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(
+            job.status == XcrowTypes.JobStatus.Created ||
+            job.status == XcrowTypes.JobStatus.Accepted ||
+            job.status == XcrowTypes.JobStatus.InProgress,
+            "Cannot refund in current state"
+        );
+        require(block.timestamp > job.deadline, "Job not expired");
+        // Only client can refund immediately; others must wait an extra grace period
+        require(
+            msg.sender == job.client || block.timestamp > job.deadline + disputeTimeout,
+            "Only client can refund before grace period"
+        );
+
+        job.status = XcrowTypes.JobStatus.Expired;
+
+        // Full refund to client
+        usdc.safeTransfer(job.client, job.amount);
+
+        emit JobRefunded(jobId, job.amount);
+    }
+
+    // --- View Functions ---
+
+    /// @inheritdoc IXcrowEscrow
+    function getJob(uint256 jobId) external view returns (XcrowTypes.Job memory) {
+        return jobs[jobId];
+    }
+
+    /// @inheritdoc IXcrowEscrow
+    function getClientJobs(address client) external view returns (uint256[] memory) {
+        return clientJobs[client];
+    }
+
+    /// @inheritdoc IXcrowEscrow
+    function getAgentJobs(uint256 agentId) external view returns (uint256[] memory) {
+        return agentJobs[agentId];
+    }
+
+    // --- Admin Functions ---
+
+    function setProtocolFee(uint256 newFeeBps) external onlyOwner {
+        require(newFeeBps <= MAX_FEE_BPS, "Fee too high");
+        protocolFeeBps = newFeeBps;
+    }
+
+    function setTreasury(address newTreasury) external onlyOwner {
+        require(newTreasury != address(0), "Invalid treasury");
+        treasury = newTreasury;
+    }
+
+    function setDisputeTimeout(uint256 newTimeout) external onlyOwner {
+        disputeTimeout = newTimeout;
+    }
+
+    function withdrawFees() external onlyOwner {
+        uint256 fees = accumulatedFees;
+        require(fees > 0, "No fees to withdraw");
+        accumulatedFees = 0;
+        usdc.safeTransfer(treasury, fees);
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+}
