@@ -22,17 +22,15 @@ contract CrossChainSettlerTest is Test {
 
     uint256 public constant SETTLE_AMOUNT = 100e6; // 100 USDC
 
-    event CrossChainSettlementInitiated(uint256 indexed jobId, uint32 indexed destinationDomain, bytes32 mintRecipient, uint256 amount, uint64 cctpNonce);
+    event CrossChainSettlementInitiated(
+        uint256 indexed jobId, uint32 indexed destinationDomain, bytes32 mintRecipient, uint256 amount, uint64 cctpNonce
+    );
 
     function setUp() public {
         usdc = new MockUSDC();
         messenger = new MockTokenMessenger();
 
-        settler = new CrossChainSettler(
-            address(usdc),
-            address(messenger),
-            LOCAL_DOMAIN
-        );
+        settler = new CrossChainSettler(address(usdc), address(messenger), LOCAL_DOMAIN);
 
         // Configure supported domains
         settler.configureDomain(BASE_DOMAIN, true, bytes32(0));
@@ -105,9 +103,7 @@ contract CrossChainSettlerTest is Test {
         bytes32 recipient = settler.addressToBytes32(agentWallet);
 
         vm.expectEmit(true, true, false, true);
-        emit CrossChainSettlementInitiated(
-            1, BASE_DOMAIN, recipient, SETTLE_AMOUNT, 0
-        );
+        emit CrossChainSettlementInitiated(1, BASE_DOMAIN, recipient, SETTLE_AMOUNT, 0);
 
         settler.settleCrossChain(1, SETTLE_AMOUNT, BASE_DOMAIN, recipient, "");
     }

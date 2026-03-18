@@ -4,7 +4,9 @@ pragma solidity ^0.8.20;
 import "../libraries/XcrowTypes.sol";
 
 interface IXcrowEscrow {
-    function createJob(uint256 agentId, uint32 agentChainId, uint256 amount, bytes32 taskHash, uint256 deadline) external returns (uint256 jobId);
+    function createJob(uint256 agentId, uint32 agentChainId, uint256 amount, bytes32 taskHash, uint256 deadline)
+        external
+        returns (uint256 jobId);
     function acceptJob(uint256 jobId) external;
     function startJob(uint256 jobId) external;
     function completeJob(uint256 jobId) external;

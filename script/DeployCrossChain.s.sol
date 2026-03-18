@@ -29,9 +29,7 @@ contract DeployCrossChain is Script {
         vm.startBroadcast(pk);
 
         // Deploy CrossChainSettler on destination chain
-        CrossChainSettler settler = new CrossChainSettler(
-            usdc, CCTP_TOKEN_MESSENGER, localDomain
-        );
+        CrossChainSettler settler = new CrossChainSettler(usdc, CCTP_TOKEN_MESSENGER, localDomain);
 
         // Configure the source domain so we can also initiate settlements back
         settler.configureDomain(sourceDomain, true, bytes32(0));

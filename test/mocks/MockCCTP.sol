@@ -33,15 +33,17 @@ contract MockTokenMessenger is ITokenMessengerV2 {
         // Pull tokens from caller (simulates burn)
         IERC20(burnToken).transferFrom(msg.sender, address(this), amount);
 
-        burnRecords.push(BurnRecord({
-            amount: amount,
-            destinationDomain: destinationDomain,
-            mintRecipient: mintRecipient,
-            burnToken: burnToken,
-            destinationCaller: destinationCaller,
-            maxFee: maxFee,
-            hookData: hookData
-        }));
+        burnRecords.push(
+            BurnRecord({
+                amount: amount,
+                destinationDomain: destinationDomain,
+                mintRecipient: mintRecipient,
+                burnToken: burnToken,
+                destinationCaller: destinationCaller,
+                maxFee: maxFee,
+                hookData: hookData
+            })
+        );
 
         nonce = _nonce++;
     }

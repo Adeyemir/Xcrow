@@ -71,10 +71,7 @@ contract ReputationPricer is Ownable {
         // Verify caller owns or operates the agent
         address agentOwner = identityRegistry.ownerOf(agentId);
         address agentWallet = identityRegistry.getAgentWallet(agentId);
-        require(
-            msg.sender == agentOwner || msg.sender == agentWallet,
-            "Not agent owner or wallet"
-        );
+        require(msg.sender == agentOwner || msg.sender == agentWallet, "Not agent owner or wallet");
 
         agentBaseRates[agentId] = baseRate;
         emit BaseRateSet(agentId, baseRate);
@@ -86,10 +83,11 @@ contract ReputationPricer is Ownable {
     /// @param agentId ERC-8004 agent ID
     /// @param protocolFeeBps Protocol fee in basis points
     /// @return quote Full price quote with breakdown
-    function getQuote(
-        uint256 agentId,
-        uint256 protocolFeeBps
-    ) external view returns (XcrowTypes.PriceQuote memory quote) {
+    function getQuote(uint256 agentId, uint256 protocolFeeBps)
+        external
+        view
+        returns (XcrowTypes.PriceQuote memory quote)
+    {
         uint256 baseRate = agentBaseRates[agentId];
         require(baseRate > 0, "Agent has no base rate");
 
@@ -126,12 +124,13 @@ contract ReputationPricer is Ownable {
         }
 
         // Query ERC-8004 reputation with trusted reviewers filter
-        (uint64 count, int128 summaryValue, uint8 summaryValueDecimals) = reputationRegistry.getSummary(
-            agentId,
-            trustedReviewers,
-            pricingTag,
-            "" // no tag2 filter
-        );
+        (uint64 count, int128 summaryValue, uint8 summaryValueDecimals) =
+            reputationRegistry.getSummary(
+                agentId,
+                trustedReviewers,
+                pricingTag,
+                "" // no tag2 filter
+            );
 
         // Not enough reviews — return base rate
         if (count < minReviewCount) {
@@ -205,11 +204,10 @@ contract ReputationPricer is Ownable {
         emit TrustedReviewerRemoved(reviewer);
     }
 
-    function updatePricingConfig(
-        uint256 _maxPremiumBps,
-        uint256 _maxReputationScore,
-        uint64 _minReviewCount
-    ) external onlyOwner {
+    function updatePricingConfig(uint256 _maxPremiumBps, uint256 _maxReputationScore, uint64 _minReviewCount)
+        external
+        onlyOwner
+    {
         require(_maxPremiumBps > 0, "Premium must be > 0");
         require(_maxReputationScore > 0, "Max score must be > 0");
         maxPremiumBps = _maxPremiumBps;

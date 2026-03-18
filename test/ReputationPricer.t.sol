@@ -29,12 +29,7 @@ contract ReputationPricerTest is Test {
         reputationReg = new MockReputationRegistry(address(identityReg));
 
         pricer = new ReputationPricer(
-            address(reputationReg),
-            address(identityReg),
-            MAX_PREMIUM_BPS,
-            MAX_REP_SCORE,
-            MIN_REVIEWS,
-            "starred"
+            address(reputationReg), address(identityReg), MAX_PREMIUM_BPS, MAX_REP_SCORE, MIN_REVIEWS, "starred"
         );
 
         // Register agent

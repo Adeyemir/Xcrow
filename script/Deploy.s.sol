@@ -13,7 +13,7 @@ import {MockReputationRegistry} from "../test/mocks/MockReputationRegistry.sol";
 /// @notice Deploys all core contracts + mock registries to Arc Testnet
 contract Deploy is Script {
     // Arc Testnet USDC
-   address constant USDC = 0x3600000000000000000000000000000000000000;
+    address constant USDC = 0x3600000000000000000000000000000000000000;
     // CCTP V2 — Arc addresses (same on all chains)
     address constant CCTP_TOKEN_MESSENGER = 0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA;
     // CCTP Domain identifiers
@@ -22,7 +22,7 @@ contract Deploy is Script {
     uint32 constant DOMAIN_BASE = 6;
     uint32 constant DOMAIN_ARC = 26;
     // Local chain ID for Sepolia
-   uint32 constant LOCAL_CHAIN_ID = 5042002;
+    uint32 constant LOCAL_CHAIN_ID = 5042002;
 
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -36,25 +36,18 @@ contract Deploy is Script {
         MockReputationRegistry repReg = new MockReputationRegistry(address(idReg));
 
         // 2. Deploy core contracts
-        XcrowEscrow escrow = new XcrowEscrow(
-            USDC, address(idReg), deployer, 250, 3 days
-        );
+        XcrowEscrow escrow = new XcrowEscrow(USDC, address(idReg), deployer, 250, 3 days);
 
-        ReputationPricer pricer = new ReputationPricer(
-            address(repReg), address(idReg), 20000, 100, 3, "starred"
-        );
+        ReputationPricer pricer = new ReputationPricer(address(repReg), address(idReg), 20000, 100, 3, "starred");
         pricer.addTrustedReviewer(deployer);
 
-        CrossChainSettler settler = new CrossChainSettler(
-            USDC, CCTP_TOKEN_MESSENGER, DOMAIN_ARC       
-        );
+        CrossChainSettler settler = new CrossChainSettler(USDC, CCTP_TOKEN_MESSENGER, DOMAIN_ARC);
         settler.configureDomain(DOMAIN_BASE, true, bytes32(0));
         settler.configureDomain(DOMAIN_ARBITRUM, true, bytes32(0));
         settler.configureDomain(DOMAIN_ETHEREUM, true, bytes32(0));
 
         XcrowRouter router = new XcrowRouter(
-            USDC, address(escrow), address(pricer), address(settler),
-            address(idReg), address(repReg), LOCAL_CHAIN_ID
+            USDC, address(escrow), address(pricer), address(settler), address(idReg), address(repReg), LOCAL_CHAIN_ID
         );
 
         // 3. Post-deploy configuration

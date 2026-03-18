@@ -46,36 +46,32 @@ contract MockReputationRegistry is IERC8004Reputation {
         uint64 idx = lastIndexes[agentId][msg.sender] + 1;
         lastIndexes[agentId][msg.sender] = idx;
 
-        feedbacks[agentId][msg.sender][idx] = FeedbackEntry({
-            value: value,
-            valueDecimals: valueDecimals,
-            tag1: tag1,
-            tag2: tag2,
-            isRevoked: false
-        });
+        feedbacks[agentId][msg.sender][idx] =
+            FeedbackEntry({value: value, valueDecimals: valueDecimals, tag1: tag1, tag2: tag2, isRevoked: false});
 
         // Track client
         if (idx == 1) {
             agentClients[agentId].push(msg.sender);
         }
 
-        emit NewFeedback(agentId, msg.sender, idx, value, valueDecimals, tag1, tag1, tag2, endpoint, feedbackURI, feedbackHash);
+        emit NewFeedback(
+            agentId, msg.sender, idx, value, valueDecimals, tag1, tag1, tag2, endpoint, feedbackURI, feedbackHash
+        );
     }
 
-    function getSummary(
-        uint256 agentId,
-        address[] calldata,
-        string calldata,
-        string calldata
-    ) external view returns (uint64 count, int128 summaryValue, uint8 summaryValueDecimals) {
+    function getSummary(uint256 agentId, address[] calldata, string calldata, string calldata)
+        external
+        view
+        returns (uint64 count, int128 summaryValue, uint8 summaryValueDecimals)
+    {
         return (mockSummaryCount[agentId], mockSummaryValue[agentId], mockSummaryDecimals[agentId]);
     }
 
-    function readFeedback(
-        uint256 agentId,
-        address clientAddress,
-        uint64 feedbackIndex
-    ) external view returns (int128 value, uint8 valueDecimals, string memory tag1, string memory tag2, bool isRevoked) {
+    function readFeedback(uint256 agentId, address clientAddress, uint64 feedbackIndex)
+        external
+        view
+        returns (int128 value, uint8 valueDecimals, string memory tag1, string memory tag2, bool isRevoked)
+    {
         FeedbackEntry storage f = feedbacks[agentId][clientAddress][feedbackIndex];
         return (f.value, f.valueDecimals, f.tag1, f.tag2, f.isRevoked);
     }

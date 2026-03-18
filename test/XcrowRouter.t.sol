@@ -31,7 +31,9 @@ contract XcrowRouterTest is Test {
     uint256 public agentId;
     uint256 public constant PROTOCOL_FEE_BPS = 250;
 
-    event AgentHired(uint256 indexed jobId, uint256 indexed agentId, address indexed client, uint256 amount, bool crossChain);
+    event AgentHired(
+        uint256 indexed jobId, uint256 indexed agentId, address indexed client, uint256 amount, bool crossChain
+    );
 
     function setUp() public {
         usdc = new MockUSDC();
@@ -40,20 +42,14 @@ contract XcrowRouterTest is Test {
         messenger = new MockTokenMessenger();
 
         // Deploy core contracts
-        escrow = new XcrowEscrow(
-            address(usdc),
-            address(identityReg),
-            treasury,
-            PROTOCOL_FEE_BPS,
-            3 days
-        );
+        escrow = new XcrowEscrow(address(usdc), address(identityReg), treasury, PROTOCOL_FEE_BPS, 3 days);
 
         pricer = new ReputationPricer(
             address(reputationReg),
             address(identityReg),
             20000, // 2x max premium
-            100,   // max score
-            3,     // min reviews
+            100, // max score
+            3, // min reviews
             "starred"
         );
 
@@ -138,12 +134,7 @@ contract XcrowRouterTest is Test {
         vm.startPrank(client);
         usdc.approve(address(router), 100e6);
 
-        uint256 jobId = router.hireAgent(
-            agentId,
-            100e6,
-            keccak256("summarize this"),
-            block.timestamp + 1 days
-        );
+        uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("summarize this"), block.timestamp + 1 days);
         vm.stopPrank();
 
         assertEq(jobId, 1);
@@ -181,11 +172,8 @@ contract XcrowRouterTest is Test {
         vm.startPrank(client);
         usdc.approve(address(router), expectedQuote.effectiveRate);
 
-        (uint256 jobId, XcrowTypes.PriceQuote memory quote) = router.hireAgentWithQuote(
-            agentId,
-            keccak256("premium task"),
-            block.timestamp + 1 days
-        );
+        (uint256 jobId, XcrowTypes.PriceQuote memory quote) =
+            router.hireAgentWithQuote(agentId, keccak256("premium task"), block.timestamp + 1 days);
         vm.stopPrank();
 
         assertEq(jobId, 1);
@@ -208,9 +196,7 @@ contract XcrowRouterTest is Test {
         // Client hires agent via router
         vm.startPrank(client);
         usdc.approve(address(router), 100e6);
-        uint256 jobId = router.hireAgent(
-            agentId, 100e6, keccak256("settle test"), block.timestamp + 1 days
-        );
+        uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("settle test"), block.timestamp + 1 days);
         vm.stopPrank();
 
         // Agent accepts and completes (on escrow directly — job.client is router)
@@ -234,9 +220,7 @@ contract XcrowRouterTest is Test {
         // Full lifecycle via router
         vm.startPrank(client);
         usdc.approve(address(router), 100e6);
-        uint256 jobId = router.hireAgent(
-            agentId, 100e6, keccak256("feedback test"), block.timestamp + 1 days
-        );
+        uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("feedback test"), block.timestamp + 1 days);
         vm.stopPrank();
 
         vm.prank(agentWallet);
@@ -249,14 +233,7 @@ contract XcrowRouterTest is Test {
 
         // Client submits feedback via router — originalClient check
         vm.prank(client);
-        router.submitFeedback(
-            jobId,
-            90,
-            0,
-            "quality",
-            "ipfs://feedback",
-            keccak256("feedback")
-        );
+        router.submitFeedback(jobId, 90, 0, "quality", "ipfs://feedback", keccak256("feedback"));
 
         // Feedback recorded under router address (since router calls reputationReg)
         uint64 lastIdx = reputationReg.getLastIndex(agentId, address(router));
@@ -266,9 +243,7 @@ contract XcrowRouterTest is Test {
     function test_router_settleAndPay_revert_notClient() public {
         vm.startPrank(client);
         usdc.approve(address(router), 100e6);
-        uint256 jobId = router.hireAgent(
-            agentId, 100e6, keccak256("test"), block.timestamp + 1 days
-        );
+        uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("test"), block.timestamp + 1 days);
         vm.stopPrank();
 
         vm.prank(agentWallet);
@@ -331,8 +306,8 @@ contract XcrowRouterTest is Test {
         vm.prank(client);
         reputationReg.giveFeedback(
             agentId,
-            85,  // value
-            0,   // decimals
+            85, // value
+            0, // decimals
             "quality",
             "",
             "",
@@ -350,17 +325,14 @@ contract XcrowRouterTest is Test {
     // =========================================
 
     function test_updateEscrow() public {
-        XcrowEscrow newEscrow = new XcrowEscrow(
-            address(usdc), address(identityReg), treasury, 250, 3 days
-        );
+        XcrowEscrow newEscrow = new XcrowEscrow(address(usdc), address(identityReg), treasury, 250, 3 days);
         router.updateEscrow(address(newEscrow));
         assertEq(address(router.escrow()), address(newEscrow));
     }
 
     function test_updatePricer() public {
-        ReputationPricer newPricer = new ReputationPricer(
-            address(reputationReg), address(identityReg), 20000, 100, 3, "starred"
-        );
+        ReputationPricer newPricer =
+            new ReputationPricer(address(reputationReg), address(identityReg), 20000, 100, 3, "starred");
         router.updatePricer(address(newPricer));
         assertEq(address(router.pricer()), address(newPricer));
     }
@@ -389,9 +361,7 @@ contract XcrowRouterTest is Test {
     function test_hireAgentCrossChain_success() public {
         vm.startPrank(client);
         usdc.approve(address(router), 100e6);
-        uint256 jobId = router.hireAgentCrossChain(
-            agentId, 100e6, keccak256("cc task"), block.timestamp + 1 days, 6
-        );
+        uint256 jobId = router.hireAgentCrossChain(agentId, 100e6, keccak256("cc task"), block.timestamp + 1 days, 6);
         vm.stopPrank();
 
         XcrowTypes.Job memory job = escrow.getJob(jobId);
@@ -405,9 +375,8 @@ contract XcrowRouterTest is Test {
         // Hire cross-chain
         vm.startPrank(client);
         usdc.approve(address(router), 100e6);
-        uint256 jobId = router.hireAgentCrossChain(
-            agentId, 100e6, keccak256("cc lifecycle"), block.timestamp + 1 days, 6
-        );
+        uint256 jobId =
+            router.hireAgentCrossChain(agentId, 100e6, keccak256("cc lifecycle"), block.timestamp + 1 days, 6);
         vm.stopPrank();
 
         // Agent accepts and completes
@@ -455,7 +424,7 @@ contract XcrowRouterTest is Test {
         uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("dispute task"), block.timestamp + 1 days);
         vm.stopPrank();
 
-        vm.prank(agentWallet); 
+        vm.prank(agentWallet);
         escrow.acceptJob(jobId);
 
         vm.prank(client);

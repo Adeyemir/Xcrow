@@ -20,19 +20,14 @@ contract DeployXcrow is Script {
         MockIdentityRegistry idReg = new MockIdentityRegistry();
         MockReputationRegistry repReg = new MockReputationRegistry(address(idReg));
 
-        XcrowEscrow escrow = new XcrowEscrow(
-            0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238,
-            address(idReg), deployer, 250, 3 days
-        );
+        XcrowEscrow escrow =
+            new XcrowEscrow(0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238, address(idReg), deployer, 250, 3 days);
 
-        ReputationPricer pricer = new ReputationPricer(
-            address(repReg), address(idReg), 20000, 100, 3, "starred"
-        );
+        ReputationPricer pricer = new ReputationPricer(address(repReg), address(idReg), 20000, 100, 3, "starred");
         pricer.addTrustedReviewer(deployer);
 
         CrossChainSettler settler = new CrossChainSettler(
-            0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238,
-            0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA, 0
+            0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238, 0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA, 0
         );
         settler.configureDomain(6, true, bytes32(0));
         settler.configureDomain(26, true, bytes32(0));
@@ -40,8 +35,12 @@ contract DeployXcrow is Script {
 
         XcrowRouter router = new XcrowRouter(
             0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238,
-            address(escrow), address(pricer), address(settler),
-            address(idReg), address(repReg), 11155111
+            address(escrow),
+            address(pricer),
+            address(settler),
+            address(idReg),
+            address(repReg),
+            11155111
         );
 
         uint256 agentId = idReg.register("ipfs://xcrow-test-agent");

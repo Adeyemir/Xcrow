@@ -29,13 +29,7 @@ contract XcrowEscrowTest is Test {
         usdc = new MockUSDC();
         registry = new MockIdentityRegistry();
 
-        escrow = new XcrowEscrow(
-            address(usdc),
-            address(registry),
-            treasury,
-            PROTOCOL_FEE_BPS,
-            DISPUTE_TIMEOUT
-        );
+        escrow = new XcrowEscrow(address(usdc), address(registry), treasury, PROTOCOL_FEE_BPS, DISPUTE_TIMEOUT);
 
         // Register a mock agent
         agentId = registry.mockRegisterAgent(agentOwner, agentWallet, "ipfs://agent1");
@@ -54,13 +48,8 @@ contract XcrowEscrowTest is Test {
 
     function test_createJob_success() public {
         vm.prank(client);
-        uint256 jobId = escrow.createJob(
-            agentId,
-            11155111,
-            JOB_AMOUNT,
-            keccak256("summarize this doc"),
-            block.timestamp + 1 days
-        );
+        uint256 jobId =
+            escrow.createJob(agentId, 11155111, JOB_AMOUNT, keccak256("summarize this doc"), block.timestamp + 1 days);
 
         assertEq(jobId, 1);
 
@@ -571,7 +560,8 @@ contract XcrowEscrowTest is Test {
     function test_fullLifecycle() public {
         // 1. Client creates job
         vm.prank(client);
-        uint256 jobId = escrow.createJob(agentId, 11155111, JOB_AMOUNT, keccak256("full test"), block.timestamp + 1 days);
+        uint256 jobId =
+            escrow.createJob(agentId, 11155111, JOB_AMOUNT, keccak256("full test"), block.timestamp + 1 days);
 
         // 2. Agent accepts
         vm.prank(agentWallet);
@@ -624,9 +614,7 @@ contract XcrowEscrowTest is Test {
     function test_createCrossChainJob_revert_zeroDomain() public {
         vm.prank(client);
         vm.expectRevert("Invalid destination domain");
-        escrow.createCrossChainJob(
-            agentId, 11155111, JOB_AMOUNT, keccak256("task"), block.timestamp + 1 days, 0
-        );
+        escrow.createCrossChainJob(agentId, 11155111, JOB_AMOUNT, keccak256("task"), block.timestamp + 1 days, 0);
     }
 
     function test_createCrossChainJob_fullLifecycle() public {

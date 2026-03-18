@@ -35,11 +35,7 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
 
     // --- Events ---
     event AgentHired(
-        uint256 indexed jobId,
-        uint256 indexed agentId,
-        address indexed client,
-        uint256 amount,
-        bool crossChain
+        uint256 indexed jobId, uint256 indexed agentId, address indexed client, uint256 amount, bool crossChain
     );
     event CrossChainSettled(uint256 indexed jobId, uint32 destinationDomain, uint64 cctpNonce);
     event FeedbackSubmitted(uint256 indexed jobId, uint256 indexed agentId, int128 value);
@@ -73,12 +69,12 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
     /// @param taskHash keccak256 of task description
     /// @param deadline Block timestamp deadline
     /// @return jobId The created job ID
-    function hireAgent(
-        uint256 agentId,
-        uint256 amount,
-        bytes32 taskHash,
-        uint256 deadline
-    ) external nonReentrant whenNotPaused returns (uint256 jobId) {
+    function hireAgent(uint256 agentId, uint256 amount, bytes32 taskHash, uint256 deadline)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 jobId)
+    {
         // Transfer USDC from client to this router, then approve escrow
         usdc.safeTransferFrom(msg.sender, address(this), amount);
         usdc.forceApprove(address(escrow), amount);
@@ -98,11 +94,12 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
     /// @param deadline Block timestamp deadline
     /// @return jobId The created job ID
     /// @return quote The price quote used
-    function hireAgentWithQuote(
-        uint256 agentId,
-        bytes32 taskHash,
-        uint256 deadline
-    ) external nonReentrant whenNotPaused returns (uint256 jobId, XcrowTypes.PriceQuote memory quote) {
+    function hireAgentWithQuote(uint256 agentId, bytes32 taskHash, uint256 deadline)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 jobId, XcrowTypes.PriceQuote memory quote)
+    {
         // Get reputation-weighted quote
         quote = pricer.getQuote(agentId, escrow.protocolFeeBps());
 
@@ -150,11 +147,11 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
     /// @param jobId Job to settle
     /// @param destinationDomain CCTP domain (0 for same-chain settlement)
     /// @param hookData Optional CCTP V2 hook data
-    function settleAndPay(
-        uint256 jobId,
-        uint32 destinationDomain,
-        bytes calldata hookData
-    ) external nonReentrant whenNotPaused {
+    function settleAndPay(uint256 jobId, uint32 destinationDomain, bytes calldata hookData)
+        external
+        nonReentrant
+        whenNotPaused
+    {
         // Use originalClient for jobs created via router, fall back to job.client for direct escrow jobs
         address jobClient = originalClient[jobId];
         if (jobClient == address(0)) {
@@ -185,13 +182,7 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
             bytes32 mintRecipient = bytes32(uint256(uint160(job.agentWallet)));
 
             // Initiate cross-chain settlement
-            uint64 nonce = settler.settleCrossChain(
-                jobId,
-                agentPayout,
-                destinationDomain,
-                mintRecipient,
-                hookData
-            );
+            uint64 nonce = settler.settleCrossChain(jobId, agentPayout, destinationDomain, mintRecipient, hookData);
 
             emit CrossChainSettled(jobId, destinationDomain, nonce);
         }
@@ -256,7 +247,7 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
             valueDecimals,
             tag1,
             "xcrow", // tag2 = protocol identifier
-            "",         // endpoint
+            "", // endpoint
             feedbackURI,
             feedbackHash
         );
@@ -272,21 +263,14 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
     }
 
     /// @notice Get agent info from ERC-8004
-    function getAgentInfo(uint256 agentId) external view returns (
-        address owner,
-        address wallet,
-        string memory uri
-    ) {
+    function getAgentInfo(uint256 agentId) external view returns (address owner, address wallet, string memory uri) {
         owner = identityRegistry.ownerOf(agentId);
         wallet = identityRegistry.getAgentWallet(agentId);
         uri = identityRegistry.tokenURI(agentId);
     }
 
     /// @notice Estimate cross-chain settlement fee
-    function estimateCrossChainFee(
-        uint256 amount,
-        uint32 destinationDomain
-    ) external view returns (uint256) {
+    function estimateCrossChainFee(uint256 amount, uint32 destinationDomain) external view returns (uint256) {
         return settler.getSettlementFee(amount, destinationDomain);
     }
 

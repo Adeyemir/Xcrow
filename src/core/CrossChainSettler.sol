@@ -46,20 +46,12 @@ contract CrossChainSettler is ReentrancyGuard, Pausable, Ownable {
 
     // --- Events ---
     event CrossChainSettlementInitiated(
-        uint256 indexed jobId,
-        uint32 indexed destinationDomain,
-        bytes32 mintRecipient,
-        uint256 amount,
-        uint64 cctpNonce
+        uint256 indexed jobId, uint32 indexed destinationDomain, bytes32 mintRecipient, uint256 amount, uint64 cctpNonce
     );
     event DomainConfigured(uint32 indexed domain, bool supported, bytes32 settler);
 
     // --- Constructor ---
-    constructor(
-        address _usdc,
-        address _tokenMessenger,
-        uint32 _localDomain
-    ) Ownable(msg.sender) {
+    constructor(address _usdc, address _tokenMessenger, uint32 _localDomain) Ownable(msg.sender) {
         require(_usdc != address(0), "Invalid USDC");
         require(_tokenMessenger != address(0), "Invalid TokenMessenger");
 
@@ -101,13 +93,7 @@ contract CrossChainSettler is ReentrancyGuard, Pausable, Ownable {
 
         // Burn USDC on source chain via CCTP V2
         nonce = tokenMessenger.depositForBurnWithCaller(
-            amount,
-            destinationDomain,
-            mintRecipient,
-            address(usdc),
-            destinationCaller,
-            minFee,
-            hookData
+            amount, destinationDomain, mintRecipient, address(usdc), destinationCaller, minFee, hookData
         );
 
         // Record settlement
@@ -160,15 +146,11 @@ contract CrossChainSettler is ReentrancyGuard, Pausable, Ownable {
     }
 
     /// @notice Batch configure multiple domains
-    function configureDomains(
-        uint32[] calldata domains,
-        bool[] calldata supported,
-        bytes32[] calldata settlers
-    ) external onlyOwner {
-        require(
-            domains.length == supported.length && domains.length == settlers.length,
-            "Length mismatch"
-        );
+    function configureDomains(uint32[] calldata domains, bool[] calldata supported, bytes32[] calldata settlers)
+        external
+        onlyOwner
+    {
+        require(domains.length == supported.length && domains.length == settlers.length, "Length mismatch");
         for (uint256 i = 0; i < domains.length; i++) {
             supportedDomains[domains[i]] = supported[i];
             destinationSettlers[domains[i]] = settlers[i];
