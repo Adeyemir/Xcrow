@@ -6,22 +6,22 @@ import IdentityRegistryABI from "./abis/IdentityRegistry.json";
 import ERC20ABI from "./abis/ERC20.json";
 
 export const ADDRESSES = {
-  USDC: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-  IdentityRegistry: "0xeD89c1407871f215e1EcE3A3c6CC3a708d5C93A5",
-  ReputationRegistry: "0x55BF88727b2C175CF09A263806AE3C7AD81e7860",
-  XcrowEscrow: "0x2Cd88Fa68B44d99dD7853A45e810Ee3f117C0445",
-  ReputationPricer: "0x16Cb8F60f3145a8Adb640Cf86cA4Ad687E8b1E15",
-  CrossChainSettler: "0x32Af375d550a8F23ce061680182a614D52695155",
-  XcrowRouter: "0x726f13Fac1F381CE8b675de93AaaED5Ab37DB9BA",
+  USDC: "0x3600000000000000000000000000000000000000",
+  IdentityRegistry: "0x54f6964C210A834357559a781B9208f3AFd7cd1B",
+  ReputationRegistry: "0xbE613274985346A1dFD7355871675Bf1dAAfec0E",
+  XcrowEscrow: "0x57e902A674b57971ec94aD1E3e203DF1B2479BC0",
+  ReputationPricer: "0x4698BCCD1E64317C3d40eac6C05303D6784EDF14",
+  CrossChainSettler: "0x940c62B902CB31001eC4CeA7Bf04253dAa983e17",
+  XcrowRouter: "0x27aa8D66de7ACEdf4996E91BF0CcF79E3eAc2829",
 } as const;
 
-export const SEPOLIA_CHAIN_ID = 11155111;
+export const ARC_CHAIN_ID = 5042002;
 
 export const CCTP_DOMAIN_NAMES: Record<number, string> = {
   0: "Ethereum",
   3: "Arbitrum",
   6: "Base",
-  26: "Linea",
+  26: "Arc",
 };
 
 export function getEscrow(signerOrProvider: Signer | Provider) {

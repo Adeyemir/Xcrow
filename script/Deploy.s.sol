@@ -9,12 +9,12 @@ import {XcrowRouter} from "../src/core/XcrowRouter.sol";
 import {MockIdentityRegistry} from "../test/mocks/MockIdentityRegistry.sol";
 import {MockReputationRegistry} from "../test/mocks/MockReputationRegistry.sol";
 
-/// @title Deploy — Xcrow Protocol (Sepolia)
-/// @notice Deploys all core contracts + mock registries to Ethereum Sepolia
+/// @title Deploy — Xcrow Protocol (Arc Testnet)
+/// @notice Deploys all core contracts + mock registries to Arc Testnet
 contract Deploy is Script {
-    // Sepolia USDC
-    address constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
-    // CCTP V2 — Sepolia addresses (same on all chains)
+    // Arc Testnet USDC
+   address constant USDC = 0x3600000000000000000000000000000000000000;
+    // CCTP V2 — Arc addresses (same on all chains)
     address constant CCTP_TOKEN_MESSENGER = 0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA;
     // CCTP Domain identifiers
     uint32 constant DOMAIN_ETHEREUM = 0;
@@ -22,7 +22,7 @@ contract Deploy is Script {
     uint32 constant DOMAIN_BASE = 6;
     uint32 constant DOMAIN_ARC = 26;
     // Local chain ID for Sepolia
-    uint32 constant LOCAL_CHAIN_ID = 11155111;
+   uint32 constant LOCAL_CHAIN_ID = 5042002;
 
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -46,11 +46,11 @@ contract Deploy is Script {
         pricer.addTrustedReviewer(deployer);
 
         CrossChainSettler settler = new CrossChainSettler(
-            USDC, CCTP_TOKEN_MESSENGER, DOMAIN_ETHEREUM
+            USDC, CCTP_TOKEN_MESSENGER, DOMAIN_ARC       
         );
         settler.configureDomain(DOMAIN_BASE, true, bytes32(0));
-        settler.configureDomain(DOMAIN_ARC, true, bytes32(0));
         settler.configureDomain(DOMAIN_ARBITRUM, true, bytes32(0));
+        settler.configureDomain(DOMAIN_ETHEREUM, true, bytes32(0));
 
         XcrowRouter router = new XcrowRouter(
             USDC, address(escrow), address(pricer), address(settler),
