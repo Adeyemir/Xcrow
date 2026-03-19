@@ -6,23 +6,24 @@ import {XcrowEscrow} from "../src/core/XcrowEscrow.sol";
 import {ReputationPricer} from "../src/core/ReputationPricer.sol";
 import {CrossChainSettler} from "../src/core/CrossChainSettler.sol";
 import {XcrowRouter} from "../src/core/XcrowRouter.sol";
-import {MockIdentityRegistry} from "../test/mocks/MockIdentityRegistry.sol";
-import {MockReputationRegistry} from "../test/mocks/MockReputationRegistry.sol";
 
 /// @title Deploy — Xcrow Protocol (Arc Testnet)
-/// @notice Deploys all core contracts + mock registries to Arc Testnet
+/// @notice Deploys all core contracts against real ERC-8004 registries on Arc Testnet
 contract Deploy is Script {
     // Arc Testnet USDC
     address constant USDC = 0x3600000000000000000000000000000000000000;
-    // CCTP V2 — Arc addresses (same on all chains)
+    // CCTP V2 — Arc addresses
     address constant CCTP_TOKEN_MESSENGER = 0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA;
     // CCTP Domain identifiers
     uint32 constant DOMAIN_ETHEREUM = 0;
     uint32 constant DOMAIN_ARBITRUM = 3;
     uint32 constant DOMAIN_BASE = 6;
     uint32 constant DOMAIN_ARC = 26;
-    // Local chain ID for Sepolia
+    // Arc Testnet chain ID
     uint32 constant LOCAL_CHAIN_ID = 5042002;
+    // Real ERC-8004 contracts on Arc Testnet
+    address constant ERC8004_IDENTITY   = 0x8004A818BFB912233c491871b3d84c89A494BD9e;
+    address constant ERC8004_REPUTATION = 0x8004B663056A597Dffe9eCcC1965A193B7388713;
 
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -31,14 +32,10 @@ contract Deploy is Script {
 
         vm.startBroadcast(pk);
 
-        // 1. Deploy mock ERC-8004 registries (replace with real addresses in production)
-        MockIdentityRegistry idReg = new MockIdentityRegistry();
-        MockReputationRegistry repReg = new MockReputationRegistry(address(idReg));
+        // 1. Deploy core contracts against real ERC-8004 registries
+        XcrowEscrow escrow = new XcrowEscrow(USDC, ERC8004_IDENTITY, deployer, 250, 3 days);
 
-        // 2. Deploy core contracts
-        XcrowEscrow escrow = new XcrowEscrow(USDC, address(idReg), deployer, 250, 3 days);
-
-        ReputationPricer pricer = new ReputationPricer(address(repReg), address(idReg), 20000, 100, 3, "starred");
+        ReputationPricer pricer = new ReputationPricer(ERC8004_REPUTATION, ERC8004_IDENTITY, 20000, 100, 3, "starred");
         pricer.addTrustedReviewer(deployer);
 
         CrossChainSettler settler = new CrossChainSettler(USDC, CCTP_TOKEN_MESSENGER, DOMAIN_ARC);
@@ -47,26 +44,20 @@ contract Deploy is Script {
         settler.configureDomain(DOMAIN_ETHEREUM, true, bytes32(0));
 
         XcrowRouter router = new XcrowRouter(
-            USDC, address(escrow), address(pricer), address(settler), address(idReg), address(repReg), LOCAL_CHAIN_ID
+            USDC, address(escrow), address(pricer), address(settler), ERC8004_IDENTITY, ERC8004_REPUTATION, LOCAL_CHAIN_ID
         );
 
-        // 3. Post-deploy configuration
-        // Authorize the Router to call the CrossChainSettler
+        // 2. Authorize the Router to call the CrossChainSettler
         settler.setAuthorizedCaller(address(router), true);
-
-        // 4. Register a test agent
-        uint256 agentId = idReg.register("ipfs://xcrow-test-agent");
-        pricer.setBaseRate(agentId, 5e6); // 5 USDC base rate
 
         vm.stopBroadcast();
 
         console.log("=== Deployed Addresses ===");
-        console.log("IdentityRegistry:", address(idReg));
-        console.log("ReputationRegistry:", address(repReg));
+        console.log("IdentityRegistry (ERC-8004):", ERC8004_IDENTITY);
+        console.log("ReputationRegistry (ERC-8004):", ERC8004_REPUTATION);
         console.log("XcrowEscrow:", address(escrow));
         console.log("ReputationPricer:", address(pricer));
         console.log("CrossChainSettler:", address(settler));
         console.log("XcrowRouter:", address(router));
-        console.log("Test Agent ID:", agentId);
     }
 }

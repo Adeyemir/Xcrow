@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
@@ -33,6 +34,9 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
     /// @notice Maps escrow jobId to the original client who hired via the Router
     mapping(uint256 => address) public originalClient;
 
+    /// @notice Maps escrow jobId to the ERC-8004 agentId for reputation feedback
+    mapping(uint256 => uint256) public jobERC8004AgentId;
+
     // --- Events ---
     event AgentHired(
         uint256 indexed jobId, uint256 indexed agentId, address indexed client, uint256 amount, bool crossChain
@@ -63,6 +67,30 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
 
     // --- Core Functions ---
 
+    /// @notice Hire an agent by wallet address with EIP-2612 permit — no ERC-8004 ID needed
+    /// @param erc8004AgentId The agent's ERC-8004 token ID for reputation tracking (0 if unknown)
+    function hireAgentByWalletWithPermit(
+        address agentWallet,
+        uint256 amount,
+        bytes32 taskHash,
+        uint256 deadline,
+        uint256 erc8004AgentId,
+        uint256 permitDeadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant whenNotPaused returns (uint256 jobId) {
+        IERC20Permit(address(usdc)).permit(msg.sender, address(this), amount, permitDeadline, v, r, s);
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        usdc.forceApprove(address(escrow), amount);
+
+        jobId = escrow.createJobByWallet(agentWallet, amount, taskHash, deadline);
+        originalClient[jobId] = msg.sender;
+        if (erc8004AgentId != 0) jobERC8004AgentId[jobId] = erc8004AgentId;
+
+        emit AgentHired(jobId, erc8004AgentId, msg.sender, amount, false);
+    }
+
     /// @notice Hire an agent on the same chain
     /// @param agentId ERC-8004 agent ID
     /// @param amount USDC amount to pay
@@ -83,6 +111,38 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
         jobId = escrow.createJob(agentId, localChainId, amount, taskHash, deadline);
 
         // Track original client for delegation
+        originalClient[jobId] = msg.sender;
+
+        emit AgentHired(jobId, agentId, msg.sender, amount, false);
+    }
+
+    /// @notice Hire an agent using EIP-2612 permit — one tx, no pre-approval needed
+    /// @param agentId ERC-8004 agent ID
+    /// @param amount USDC amount to pay
+    /// @param taskHash keccak256 of task description
+    /// @param deadline Job deadline (block timestamp)
+    /// @param permitDeadline Permit expiry (block timestamp)
+    /// @param v Permit signature v
+    /// @param r Permit signature r
+    /// @param s Permit signature s
+    /// @return jobId The created job ID
+    function hireAgentWithPermit(
+        uint256 agentId,
+        uint256 amount,
+        bytes32 taskHash,
+        uint256 deadline,
+        uint256 permitDeadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant whenNotPaused returns (uint256 jobId) {
+        // Execute permit — approves this router in the same tx
+        IERC20Permit(address(usdc)).permit(msg.sender, address(this), amount, permitDeadline, v, r, s);
+
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        usdc.forceApprove(address(escrow), amount);
+
+        jobId = escrow.createJob(agentId, localChainId, amount, taskHash, deadline);
         originalClient[jobId] = msg.sender;
 
         emit AgentHired(jobId, agentId, msg.sender, amount, false);
@@ -155,8 +215,7 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
         // Use originalClient for jobs created via router, fall back to job.client for direct escrow jobs
         address jobClient = originalClient[jobId];
         if (jobClient == address(0)) {
-            XcrowTypes.Job memory job = escrow.getJob(jobId);
-            jobClient = job.client;
+            jobClient = escrow.getJob(jobId).client;
         }
         require(msg.sender == jobClient, "Only client can settle");
 
@@ -164,8 +223,27 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
         require(job.status == XcrowTypes.JobStatus.Completed, "Job not completed");
 
         if (destinationDomain == 0 || !job.isCrossChain) {
-            // Same-chain settlement — just settle via escrow
+            // Same-chain settlement — settle via escrow
             escrow.settleJob(jobId);
+
+            // Auto-submit proof-of-payment feedback to ERC-8004
+            // Use jobERC8004AgentId if set (wallet-based hires), else fall back to job.agentId
+            uint256 reputationAgentId = jobERC8004AgentId[jobId] != 0 ? jobERC8004AgentId[jobId] : job.agentId;
+            // try/catch so a reputation registry failure never blocks settlement
+            if (reputationAgentId != 0) {
+                try reputationRegistry.giveFeedback(
+                    reputationAgentId,
+                    1,   // positive value: payment was made
+                    0,   // valueDecimals
+                    "", // tag1
+                    "", // tag2
+                    "", // endpoint
+                    "", // feedbackURI
+                    keccak256(abi.encode(jobClient, job.agentWallet, block.chainid, jobId))
+                ) {
+                    emit FeedbackSubmitted(jobId, reputationAgentId, 1);
+                } catch {}
+            }
         } else {
             // Cross-chain settlement via CCTP V2
             // First settle in escrow — this pays the agent on this chain.
@@ -205,6 +283,18 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
         }
     }
 
+    /// @notice Agent rejects a Router-created job — USDC refunded directly to original client
+    /// @param jobId Job to reject (must be in Created status)
+    function rejectJobViaRouter(uint256 jobId) external nonReentrant whenNotPaused {
+        XcrowTypes.Job memory job = escrow.getJob(jobId);
+        require(msg.sender == job.agentWallet, "Not agent wallet");
+
+        address refundRecipient = originalClient[jobId];
+        if (refundRecipient == address(0)) refundRecipient = job.client;
+
+        escrow.rejectJob(jobId, refundRecipient);
+    }
+
     /// @notice Dispute a Router-created job on behalf of the original client
     /// @param jobId Job to dispute
     /// @param reason Human-readable reason for the dispute
@@ -240,9 +330,13 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
         require(msg.sender == jobClient, "Only client can submit feedback");
         require(job.status == XcrowTypes.JobStatus.Settled, "Job not settled");
 
+        // Use jobERC8004AgentId for wallet-based hires (job.agentId = 0 for those)
+        uint256 reputationAgentId = jobERC8004AgentId[jobId] != 0 ? jobERC8004AgentId[jobId] : job.agentId;
+        require(reputationAgentId != 0, "No ERC-8004 agent id linked to job");
+
         // Submit feedback to ERC-8004 Reputation Registry
         reputationRegistry.giveFeedback(
-            job.agentId,
+            reputationAgentId,
             value,
             valueDecimals,
             tag1,
@@ -252,7 +346,7 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
             feedbackHash
         );
 
-        emit FeedbackSubmitted(jobId, job.agentId, value);
+        emit FeedbackSubmitted(jobId, reputationAgentId, value);
     }
 
     // --- View Functions ---

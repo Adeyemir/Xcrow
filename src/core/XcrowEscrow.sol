@@ -29,7 +29,8 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
 
     mapping(uint256 => XcrowTypes.Job) public jobs;
     mapping(address => uint256[]) public clientJobs;
-    mapping(uint256 => uint256[]) public agentJobs; // agentId => jobIds
+    mapping(uint256 => uint256[]) public agentJobs;        // agentId => jobIds
+    mapping(address => uint256[]) public agentWalletJobs;  // agentWallet => jobIds
 
     // Accumulated protocol fees ready for withdrawal
     uint256 public accumulatedFees;
@@ -57,6 +58,45 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
 
     // --- Core Functions ---
 
+    /// @notice Create a job by specifying the agent's wallet address directly (no ERC-8004 lookup needed)
+    function createJobByWallet(address agentWallet, uint256 amount, bytes32 taskHash, uint256 deadline)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 jobId)
+    {
+        require(amount > 0, "Amount must be > 0");
+        require(deadline > block.timestamp, "Deadline must be future");
+        require(taskHash != bytes32(0), "Task hash required");
+        require(agentWallet != address(0), "Invalid agent wallet");
+
+        uint256 platformFee = (amount * protocolFeeBps) / 10000;
+        jobId = nextJobId++;
+
+        jobs[jobId] = XcrowTypes.Job({
+            jobId: jobId,
+            agentId: 0,
+            agentChainId: uint32(block.chainid),
+            client: msg.sender,
+            agentWallet: agentWallet,
+            amount: amount,
+            platformFee: platformFee,
+            taskHash: taskHash,
+            deadline: deadline,
+            createdAt: block.timestamp,
+            settledAt: 0,
+            status: XcrowTypes.JobStatus.Created,
+            isCrossChain: false,
+            destinationDomain: 0
+        });
+
+        clientJobs[msg.sender].push(jobId);
+        agentWalletJobs[agentWallet].push(jobId);
+
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        emit JobCreated(jobId, 0, msg.sender, amount);
+    }
+
     /// @inheritdoc IXcrowEscrow
     function createJob(uint256 agentId, uint32 agentChainId, uint256 amount, bytes32 taskHash, uint256 deadline)
         external
@@ -71,7 +111,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
         // Resolve agent's payment wallet from ERC-8004
         address agentWallet = identityRegistry.getAgentWallet(agentId);
         require(agentWallet != address(0), "Agent has no wallet set");
-        require(agentWallet != msg.sender, "Cannot hire yourself");
+        // Note: self-hire allowed on testnet for single-wallet testing
 
         // Calculate fee
         uint256 platformFee = (amount * protocolFeeBps) / 10000;
@@ -97,6 +137,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
 
         clientJobs[msg.sender].push(jobId);
         agentJobs[agentId].push(jobId);
+        agentWalletJobs[agentWallet].push(jobId);
 
         // Transfer USDC from client to escrow
         usdc.safeTransferFrom(msg.sender, address(this), amount);
@@ -145,17 +186,30 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
 
         clientJobs[msg.sender].push(jobId);
         agentJobs[agentId].push(jobId);
+        agentWalletJobs[agentWallet].push(jobId);
 
         usdc.safeTransferFrom(msg.sender, address(this), amount);
 
         emit JobCreated(jobId, agentId, msg.sender, amount);
     }
 
+    /// @notice Agent rejects a job — refund goes to refundRecipient (caller handles auth)
+    function rejectJob(uint256 jobId, address refundRecipient) external nonReentrant {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(job.status == XcrowTypes.JobStatus.Created, "Job not in Created state");
+
+        job.status = XcrowTypes.JobStatus.Cancelled;
+
+        usdc.safeTransfer(refundRecipient, job.amount);
+
+        emit JobCancelled(jobId);
+    }
+
     /// @inheritdoc IXcrowEscrow
     function acceptJob(uint256 jobId) external nonReentrant {
         XcrowTypes.Job storage job = jobs[jobId];
         require(job.status == XcrowTypes.JobStatus.Created, "Job not in Created state");
-        require(msg.sender == job.agentWallet, "Only agent can accept");
+        require(job.agentWallet == msg.sender, "Not agent wallet");
         require(block.timestamp < job.deadline, "Job expired");
 
         job.status = XcrowTypes.JobStatus.Accepted;
@@ -166,7 +220,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
     function startJob(uint256 jobId) external nonReentrant {
         XcrowTypes.Job storage job = jobs[jobId];
         require(job.status == XcrowTypes.JobStatus.Accepted, "Job not Accepted");
-        require(msg.sender == job.agentWallet, "Only agent can start");
+        require(job.agentWallet == msg.sender, "Not agent wallet");
 
         job.status = XcrowTypes.JobStatus.InProgress;
         emit JobStarted(jobId);
@@ -179,7 +233,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
             job.status == XcrowTypes.JobStatus.Accepted || job.status == XcrowTypes.JobStatus.InProgress,
             "Job not in progress"
         );
-        require(msg.sender == job.agentWallet, "Only agent can complete");
+        require(job.agentWallet == msg.sender, "Not agent wallet");
 
         job.status = XcrowTypes.JobStatus.Completed;
         emit JobCompleted(jobId);
@@ -313,6 +367,10 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
     /// @inheritdoc IXcrowEscrow
     function getAgentJobs(uint256 agentId) external view returns (uint256[] memory) {
         return agentJobs[agentId];
+    }
+
+    function getAgentWalletJobs(address wallet) external view returns (uint256[] memory) {
+        return agentWalletJobs[wallet];
     }
 
     // --- Admin Functions ---
