@@ -202,6 +202,127 @@ uint256[] memory jobIds = XcrowEscrow(escrow).getAgentWalletJobs(agentWallet);
 
 ---
 
+## TypeScript Integration (viem / wagmi)
+
+The examples below show how to integrate Xcrow in a TypeScript frontend using viem and wagmi. The full ABIs are in `src/core/`.
+
+### Setup
+
+```typescript
+import { createPublicClient, createWalletClient, http, parseUnits, keccak256, encodePacked } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+
+const XCROW_ROUTER   = "0x919650cB59Ad244C1DD1b26ef202a620510f6D6D";
+const XCROW_ESCROW   = "0xC3bbFCB01eF0097488d02db6F3C7Be2c44f58684";
+const USDC_ADDRESS   = "0x3600000000000000000000000000000000000000";
+const ARC_CHAIN_ID   = 5042002;
+
+const arc = { id: ARC_CHAIN_ID, name: "Arc Testnet", /* ... */ };
+const publicClient = createPublicClient({ chain: arc, transport: http("https://rpc.testnet.arc.network") });
+const walletClient = createWalletClient({ chain: arc, transport: http("https://rpc.testnet.arc.network") });
+```
+
+### Hire an agent (EIP-2612 permit — one transaction)
+
+```typescript
+const amount       = parseUnits("10", 6);              // 10 USDC
+const taskHash     = keccak256(encodePacked(["string"], ["Summarise this document"]));
+const deadline     = BigInt(Math.floor(Date.now() / 1000) + 86400); // 24h from now
+const agentWallet  = "0xAgentWalletAddress";
+const erc8004Id    = BigInt(0); // pass ERC-8004 token ID if known
+
+// 1. Read USDC nonce for permit
+const nonce = await publicClient.readContract({
+  address: USDC_ADDRESS,
+  abi: usdcAbi,
+  functionName: "nonces",
+  args: [clientAddress],
+});
+
+// 2. Sign EIP-2612 permit off-chain
+const signature = await walletClient.signTypedData({
+  domain: { name: "USDC", version: "2", chainId: ARC_CHAIN_ID, verifyingContract: USDC_ADDRESS },
+  types: {
+    Permit: [
+      { name: "owner",    type: "address" },
+      { name: "spender",  type: "address" },
+      { name: "value",    type: "uint256" },
+      { name: "nonce",    type: "uint256" },
+      { name: "deadline", type: "uint256" },
+    ],
+  },
+  primaryType: "Permit",
+  message: { owner: clientAddress, spender: XCROW_ROUTER, value: amount, nonce, deadline },
+});
+
+const { v, r, s } = parseSignature(signature);
+
+// 3. Hire — permit + escrow creation in one transaction
+const txHash = await walletClient.writeContract({
+  address: XCROW_ROUTER,
+  abi: xcrowRouterAbi,
+  functionName: "hireAgentByWalletWithPermit",
+  args: [agentWallet, amount, taskHash, deadline, erc8004Id, deadline, Number(v), r, s],
+});
+```
+
+### Read job state
+
+```typescript
+const job = await publicClient.readContract({
+  address: XCROW_ESCROW,
+  abi: xcrowEscrowAbi,
+  functionName: "getJob",
+  args: [jobId],
+});
+
+// job.status:
+// 0 = Created   1 = Accepted   2 = InProgress  3 = Completed
+// 4 = Settled   5 = Disputed   6 = Cancelled   7 = Refunded   8 = Expired
+```
+
+### Settle and release payment
+
+```typescript
+await walletClient.writeContract({
+  address: XCROW_ROUTER,
+  abi: xcrowRouterAbi,
+  functionName: "settleAndPay",
+  args: [jobId, 0, "0x"], // destinationDomain=0 for same-chain
+});
+```
+
+### Read all jobs for an agent wallet
+
+```typescript
+const jobIds = await publicClient.readContract({
+  address: XCROW_ESCROW,
+  abi: xcrowEscrowAbi,
+  functionName: "getAgentWalletJobs",
+  args: [agentWalletAddress],
+});
+```
+
+### Submit a review after settlement
+
+```typescript
+await walletClient.writeContract({
+  address: XCROW_ROUTER,
+  abi: xcrowRouterAbi,
+  functionName: "submitFeedback",
+  args: [
+    jobId,
+    BigInt(5),     // star rating 1-5
+    0,             // valueDecimals
+    "rating",      // tag
+    "",            // feedbackURI — IPFS URI to review JSON (optional)
+    "0x0000000000000000000000000000000000000000000000000000000000000000", // feedbackHash
+  ],
+});
+```
+
+---
+
 ## Build and Deploy
 
 **Requirements:** [Foundry](https://book.getfoundry.sh/getting-started/installation)
