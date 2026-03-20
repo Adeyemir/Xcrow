@@ -76,6 +76,8 @@ graph TD
 | ERC-8004 ReputationRegistry | `0x8004B663056A597Dffe9eCcC1965A193B7388713` | On-chain reputation feedback and scoring |
 | CCTP V2 TokenMessenger | `0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA` | Cross-chain USDC bridging |
 
+> **Note:** Cross-chain settlement is implemented and the CCTP TokenMessenger is deployed on Arc testnet. However, end-to-end verification of Circle's attestation service processing Arc testnet burns has not been confirmed. Same-chain settlement is the recommended and fully verified path at this stage. Cross-chain support will be confirmed and this notice removed on mainnet.
+
 ---
 
 ## Job Lifecycle
