@@ -233,8 +233,8 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
             if (reputationAgentId != 0) {
                 try reputationRegistry.giveFeedback(
                     reputationAgentId,
-                    1,   // positive value: payment was made
-                    0,   // valueDecimals
+                    1, // positive value: payment was made
+                    0, // valueDecimals
                     "", // tag1
                     "", // tag2
                     "", // endpoint

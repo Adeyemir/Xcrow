@@ -74,12 +74,10 @@ interface IERC8004Reputation {
     /// @return count               Number of matching feedback entries
     /// @return summaryValue        Aggregated value
     /// @return summaryValueDecimals Decimals of the aggregated value
-    function getSummary(
-        uint256 agentId,
-        address[] calldata clientAddresses,
-        string calldata tag1,
-        string calldata tag2
-    ) external view returns (uint64 count, int128 summaryValue, uint8 summaryValueDecimals);
+    function getSummary(uint256 agentId, address[] calldata clientAddresses, string calldata tag1, string calldata tag2)
+        external
+        view
+        returns (uint64 count, int128 summaryValue, uint8 summaryValueDecimals);
 
     function readFeedback(uint256 agentId, address clientAddress, uint64 feedbackIndex)
         external

@@ -29,8 +29,8 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
 
     mapping(uint256 => XcrowTypes.Job) public jobs;
     mapping(address => uint256[]) public clientJobs;
-    mapping(uint256 => uint256[]) public agentJobs;        // agentId => jobIds
-    mapping(address => uint256[]) public agentWalletJobs;  // agentWallet => jobIds
+    mapping(uint256 => uint256[]) public agentJobs; // agentId => jobIds
+    mapping(address => uint256[]) public agentWalletJobs; // agentWallet => jobIds
 
     // Accumulated protocol fees ready for withdrawal
     uint256 public accumulatedFees;

@@ -22,7 +22,7 @@ contract Deploy is Script {
     // Arc Testnet chain ID
     uint32 constant LOCAL_CHAIN_ID = 5042002;
     // Real ERC-8004 contracts on Arc Testnet
-    address constant ERC8004_IDENTITY   = 0x8004A818BFB912233c491871b3d84c89A494BD9e;
+    address constant ERC8004_IDENTITY = 0x8004A818BFB912233c491871b3d84c89A494BD9e;
     address constant ERC8004_REPUTATION = 0x8004B663056A597Dffe9eCcC1965A193B7388713;
 
     function run() external {
@@ -44,7 +44,13 @@ contract Deploy is Script {
         settler.configureDomain(DOMAIN_ETHEREUM, true, bytes32(0));
 
         XcrowRouter router = new XcrowRouter(
-            USDC, address(escrow), address(pricer), address(settler), ERC8004_IDENTITY, ERC8004_REPUTATION, LOCAL_CHAIN_ID
+            USDC,
+            address(escrow),
+            address(pricer),
+            address(settler),
+            ERC8004_IDENTITY,
+            ERC8004_REPUTATION,
+            LOCAL_CHAIN_ID
         );
 
         // 2. Authorize the Router to call the CrossChainSettler
