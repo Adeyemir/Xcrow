@@ -148,7 +148,7 @@ contract XcrowEscrowTest is Test {
         uint256 jobId = _createDefaultJob();
 
         vm.prank(client);
-        vm.expectRevert("Only agent can accept");
+        vm.expectRevert("Not agent wallet");
         escrow.acceptJob(jobId);
     }
 
@@ -228,7 +228,7 @@ contract XcrowEscrowTest is Test {
         uint256 jobId = _createAndAcceptJob();
 
         vm.prank(client);
-        vm.expectRevert("Only agent can complete");
+        vm.expectRevert("Not agent wallet");
         escrow.completeJob(jobId);
     }
 

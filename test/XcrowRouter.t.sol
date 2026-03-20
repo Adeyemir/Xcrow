@@ -236,8 +236,9 @@ contract XcrowRouterTest is Test {
         router.submitFeedback(jobId, 90, 0, "quality", "ipfs://feedback", keccak256("feedback"));
 
         // Feedback recorded under router address (since router calls reputationReg)
+        // Index is 2: settleAndPay auto-submits proof-of-payment (index 1), submitFeedback adds the rating (index 2)
         uint64 lastIdx = reputationReg.getLastIndex(agentId, address(router));
-        assertEq(lastIdx, 1);
+        assertEq(lastIdx, 2);
     }
 
     function test_router_settleAndPay_revert_notClient() public {

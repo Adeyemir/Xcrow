@@ -111,7 +111,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
         // Resolve agent's payment wallet from ERC-8004
         address agentWallet = identityRegistry.getAgentWallet(agentId);
         require(agentWallet != address(0), "Agent has no wallet set");
-        // Note: self-hire allowed on testnet for single-wallet testing
+        require(agentWallet != msg.sender, "Cannot hire yourself");
 
         // Calculate fee
         uint256 platformFee = (amount * protocolFeeBps) / 10000;
