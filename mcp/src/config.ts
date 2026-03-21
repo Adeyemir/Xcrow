@@ -27,7 +27,7 @@ export const CCTP_DOMAINS: Record<number, string> = {
     0: "Ethereum",
     3: "Arbitrum",
     6: "Base",
-    26: "Linea",
+    26: "Arc",
 };
 
 export const JOB_STATUS_LABELS: Record<number, string> = {
@@ -42,7 +42,7 @@ export const JOB_STATUS_LABELS: Record<number, string> = {
 };
 
 // --- Provider & Wallet ---
-const rpcUrl = process.env.SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
+const rpcUrl = process.env.ARC_RPC_URL || "https://rpc.testnet.arc.network";
 const privateKey = process.env.PRIVATE_KEY;
 
 if (!privateKey) {
