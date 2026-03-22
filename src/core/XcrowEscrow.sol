@@ -25,7 +25,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
     uint256 public protocolFeeBps; // Basis points (250 = 2.5%)
     uint256 public constant MAX_FEE_BPS = 1000; // 10% max
     address public treasury;
-    uint256 public disputeTimeout;   // Seconds before auto-refund on dispute
+    uint256 public disputeTimeout; // Seconds before auto-refund on dispute
     uint256 public settlementWindow; // Seconds after PoW submission before auto-settlement is allowed
 
     mapping(uint256 => XcrowTypes.Job) public jobs;

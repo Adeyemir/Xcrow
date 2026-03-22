@@ -43,7 +43,8 @@ contract XcrowRouterTest is Test {
         messenger = new MockTokenMessenger();
 
         // Deploy core contracts
-        escrow = new XcrowEscrow(address(usdc), address(identityReg), treasury, PROTOCOL_FEE_BPS, 3 days, SETTLEMENT_WINDOW);
+        escrow =
+            new XcrowEscrow(address(usdc), address(identityReg), treasury, PROTOCOL_FEE_BPS, 3 days, SETTLEMENT_WINDOW);
 
         pricer = new ReputationPricer(
             address(reputationReg),
@@ -327,7 +328,8 @@ contract XcrowRouterTest is Test {
     // =========================================
 
     function test_updateEscrow() public {
-        XcrowEscrow newEscrow = new XcrowEscrow(address(usdc), address(identityReg), treasury, 250, 3 days, SETTLEMENT_WINDOW);
+        XcrowEscrow newEscrow =
+            new XcrowEscrow(address(usdc), address(identityReg), treasury, 250, 3 days, SETTLEMENT_WINDOW);
         router.updateEscrow(address(newEscrow));
         assertEq(address(router.escrow()), address(newEscrow));
     }

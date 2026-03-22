@@ -30,7 +30,9 @@ contract XcrowEscrowTest is Test {
         usdc = new MockUSDC();
         registry = new MockIdentityRegistry();
 
-        escrow = new XcrowEscrow(address(usdc), address(registry), treasury, PROTOCOL_FEE_BPS, DISPUTE_TIMEOUT, SETTLEMENT_WINDOW);
+        escrow = new XcrowEscrow(
+            address(usdc), address(registry), treasury, PROTOCOL_FEE_BPS, DISPUTE_TIMEOUT, SETTLEMENT_WINDOW
+        );
 
         // Register a mock agent
         agentId = registry.mockRegisterAgent(agentOwner, agentWallet, "ipfs://agent1");
