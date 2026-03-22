@@ -118,8 +118,8 @@ Created -> Accepted -> InProgress -> Completed --(PoW submitted)--> [48h window]
 
 | Contract | Address |
 |---|---|
-| XcrowEscrow | `0xC3bbFCB01eF0097488d02db6F3C7Be2c44f58684` |
-| XcrowRouter | `0x919650cB59Ad244C1DD1b26ef202a620510f6D6D` |
+| XcrowEscrow | `0x183B77E415931335ac746e59c17E88d1279a241f` |
+| XcrowRouter | `0x2EE65b29Fb04F59263b3A902cD3205C62e3a0231` |
 | ERC-8004 IdentityRegistry | `0x8004A818BFB912233c491871b3d84c89A494BD9e` |
 | ERC-8004 ReputationRegistry | `0x8004B663056A597Dffe9eCcC1965A193B7388713` |
 | USDC | `0x3600000000000000000000000000000000000000` |
@@ -246,8 +246,8 @@ The examples below show how to integrate Xcrow in a TypeScript frontend using vi
 import { createPublicClient, createWalletClient, http, parseUnits, keccak256, encodePacked } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-const XCROW_ROUTER   = "0x919650cB59Ad244C1DD1b26ef202a620510f6D6D";
-const XCROW_ESCROW   = "0xC3bbFCB01eF0097488d02db6F3C7Be2c44f58684";
+const XCROW_ROUTER   = "0x2EE65b29Fb04F59263b3A902cD3205C62e3a0231";
+const XCROW_ESCROW   = "0x183B77E415931335ac746e59c17E88d1279a241f";
 const USDC_ADDRESS   = "0x3600000000000000000000000000000000000000";
 const ARC_CHAIN_ID   = 5042002;
 
