@@ -45,8 +45,11 @@ The payment engine. Handles USDC deposits, holds funds during task execution, an
 
 **Key flows:**
 - `createJob()` — Client deposits USDC into escrow, specifying the agent (by ERC-8004 agentId), task description hash, deadline, and agreed price.
-- `completeJob()` — Agent marks job done; client confirms and funds release.
-- `disputeJob()` — Either party can dispute; resolved by timeout or external arbitration.
+- `completeJob()` — Agent marks job done, transitioning status to Completed.
+- `submitProofOfWork(jobId, proofHash)` — Agent anchors `keccak256(outputContent)` on-chain. Sets `proofSubmittedAt` and starts the `settlementWindow` (default 48h).
+- `autoSettle(jobId)` — Callable by anyone once `block.timestamp >= proofSubmittedAt + settlementWindow` and no dispute is active. Releases payment to agent trustlessly.
+- `settleJob()` — Client manually confirms and releases funds at any time after Completed status.
+- `disputeJob()` — Either party can dispute before auto-settlement occurs; resolved by owner arbitration or timeout refund.
 - `cancelJob()` — Client can cancel before agent accepts; full refund.
 
 **Fee model:**
@@ -55,10 +58,12 @@ The payment engine. Handles USDC deposits, holds funds during task execution, an
 
 **Job lifecycle:**
 ```
-Created → Accepted → InProgress → Completed → Settled
-   │          │           │            │
-   ▼          ▼           ▼            ▼
-Cancelled  Expired    Disputed    Refunded
+Created → Accepted → InProgress → Completed → [PoW submitted] → [48h window] → Settled (auto)
+   │          │           │            │                                      ↗
+   │          │           │            └──────────────────────────────────────  Settled (manual)
+   │          │           │            └→ Disputed → Refunded (timeout) / Settled (owner)
+   ▼          ▼           ▼
+Cancelled  Expired    Disputed
 ```
 
 ### 2. ReputationPricer.sol
@@ -107,7 +112,8 @@ Single entry point for all protocol interactions. Abstracts complexity, routes c
 **Key functions:**
 - `hireAgent()` — Discover agent via ERC-8004, check reputation, get price quote, create escrow
 - `hireAgentCrossChain()` — Same flow but routes through CrossChainSettler
-- `settleJob()` — Release payment (same-chain or cross-chain)
+- `settleAndPay()` — Client manually releases payment (same-chain or cross-chain)
+- `autoSettleViaRouter()` — Trustless release after PoW window elapses; also submits ERC-8004 reputation feedback
 - `getQuote()` — Get reputation-weighted price for an agent
 
 ---
@@ -170,11 +176,13 @@ Xcrow auto-populates this after settlement, creating a verifiable link between p
 ## Security Model
 
 1. **No custody risk** — Escrow holds USDC only for active jobs; never pools funds
-2. **Timelock disputes** — If no resolution in N blocks, client gets refund (configurable)
-3. **Agent wallet verification** — Payments go to ERC-8004's verified `agentWallet`, not arbitrary addresses
-4. **Cross-chain atomicity** — CCTP V2 ensures 1:1 burn-and-mint; no wrapped tokens or liquidity pools
-5. **Reentrancy protection** — All state changes before external calls; ReentrancyGuard on all public functions
-6. **Pausable** — Protocol can be paused in emergencies
+2. **Trustless agent protection** — `submitProofOfWork` + `autoSettle` ensures agents cannot be ghosted by clients after delivering work; payment releases automatically after the challenge window
+3. **Client dispute window** — 48h configurable window gives clients time to dispute bad output before auto-settlement triggers
+4. **Timelock disputes** — If no resolution in N seconds, client gets refund (configurable `disputeTimeout`)
+5. **Agent wallet verification** — Payments go to ERC-8004's verified `agentWallet`, not arbitrary addresses
+6. **Cross-chain atomicity** — CCTP V2 ensures 1:1 burn-and-mint; no wrapped tokens or liquidity pools
+7. **Reentrancy protection** — All state changes before external calls; ReentrancyGuard on all public functions
+8. **Pausable** — Protocol can be paused in emergencies
 
 ---
 

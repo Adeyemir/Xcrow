@@ -6,7 +6,9 @@ Xcrow is a trustless USDC escrow protocol for the AI agent economy, built on Arc
 
 ## Overview
 
-When a client hires an AI agent, two problems arise: the client risks paying upfront for work that is never delivered, and the agent risks completing work they are never paid for. Xcrow eliminates both risks by holding USDC in escrow for the duration of the job and releasing it only when the client confirms completion.
+When a client hires an AI agent, two problems arise: the client risks paying upfront for work that is never delivered, and the agent risks completing work they are never paid for. Xcrow eliminates both risks by holding USDC in escrow for the duration of the job and releasing it trustlessly once the agent delivers.
+
+When an agent completes a job, they submit a `proofOfWorkHash` — a keccak256 hash of their output — anchoring the delivery on-chain. This starts a 48-hour challenge window during which the client can dispute. If the client does not dispute, anyone can call `autoSettle` to release payment to the agent without requiring any further client action. Clients retain full control: they can settle manually at any time, or dispute to block auto-settlement.
 
 Every settled job writes a permanent reputation signal to the Arc ERC-8004 Reputation Registry. Over time, agents with strong track records command higher rates through reputation-weighted pricing. Clients can additionally submit star ratings after settlement, building a verifiable, tamper-proof history for each agent on-chain.
 
@@ -41,10 +43,15 @@ graph TD
     Agent -->|acceptJob| Escrow
     Agent -->|startJob| Escrow
     Agent -->|completeJob| Escrow
+    Agent -->|"submitProofOfWork\n(output hash on-chain)"| Escrow
 
     Client -->|settleAndPay| Router
     Router -->|settleJob| Escrow
     Escrow -->|transfer USDC| Agent
+
+    Agent -->|"autoSettleViaRouter\n(after 48h window)"| Router
+    Router -->|autoSettle| Escrow
+    Client -.->|"disputeJobViaRouter\n(blocks auto-settle)"| Router
 
     Router -->|"giveFeedback\n(proof-of-payment)"| Reputation
     Client -->|submitFeedback| Router
@@ -81,8 +88,10 @@ graph TD
 ## Job Lifecycle
 
 ```
-Created -> Accepted -> InProgress -> Completed -> Settled
-                                              -> Disputed -> Refunded (auto, after timeout)
+Created -> Accepted -> InProgress -> Completed --(PoW submitted)--> [48h window] --> Settled (auto)
+                                              |                                   -> Disputed -> blocks auto-settle
+                                              -> Settled (client settles manually at any time)
+                                              -> Disputed -> Refunded (auto, after disputeTimeout)
                                                           -> Settled  (owner resolves in agent's favor)
         -> Cancelled  (client cancels or agent rejects before acceptance)
         -> Expired    (deadline passed with no completion)
@@ -94,7 +103,9 @@ Created -> Accepted -> InProgress -> Completed -> Settled
 | Accepted | Agent | `acceptJob` |
 | InProgress | Agent | `startJob` |
 | Completed | Agent | `completeJob` |
-| Settled | Client | `settleAndPay` |
+| Proof submitted | Agent | `submitProofOfWork` (escrow direct) |
+| Settled (manual) | Client | `settleAndPay` |
+| Settled (auto) | Anyone after 48h window | `autoSettleViaRouter` |
 | Cancelled (client) | Client | `cancelJobViaRouter` |
 | Cancelled (agent) | Agent | `rejectJobViaRouter` |
 | Disputed | Client or Agent | `disputeJobViaRouter` |
@@ -131,9 +142,15 @@ Hiring is a single transaction. The client signs a permit off-chain to authorise
 
 When a job is created via the Router, `job.client` in the escrow is the Router address, not the user's wallet. The Router maintains an `originalClient` mapping so that all cancellations, settlements, and refunds are correctly forwarded to the actual client. This also allows the Router to be upgraded independently of the Escrow.
 
+**Proof of Work and trustless auto-settlement**
+
+When an agent completes a job, they call `submitProofOfWork(jobId, proofHash)` directly on the escrow. `proofHash` is `keccak256` of the output content, anchoring delivery on-chain. This starts a 48-hour challenge window (`settlementWindow`, configurable by the owner).
+
+During the window the client can call `disputeJobViaRouter` to block payment. If no dispute is raised, anyone — typically the agent — calls `autoSettleViaRouter` to release payment trustlessly. The client can also settle manually via `settleAndPay` at any time, with or without a PoW submission.
+
 **Reputation feedback on settlement**
 
-Every settled job automatically submits a proof-of-payment signal to ERC-8004 via `giveFeedback`. After settlement, clients can call `submitFeedback` on the Router to attach a star rating (1–5) and an optional IPFS-hosted review. The `ReputationPricer` aggregates this data to compute reputation-weighted pricing for future hires.
+Every settled job (manual or auto) automatically submits a proof-of-payment signal to ERC-8004 via `giveFeedback`. After settlement, clients can call `submitFeedback` on the Router to attach a star rating (1–5) and an optional IPFS-hosted review. The `ReputationPricer` aggregates this data to compute reputation-weighted pricing for future hires.
 
 **Protocol fee**
 
@@ -161,10 +178,27 @@ XcrowRouter(router).hireAgentByWalletWithPermit(
 );
 ```
 
-### Release payment
+### Submit Proof of Work (agent)
 
 ```solidity
-// Client calls after the agent marks the job complete
+// Agent calls after completeJob to anchor output hash on-chain
+// proofHash = keccak256(outputContent) — e.g., hash of the IPFS CID or raw output
+XcrowEscrow(escrow).submitProofOfWork(jobId, proofHash);
+// Starts the 48h settlement window
+```
+
+### Trustless auto-settlement (after challenge window)
+
+```solidity
+// Anyone calls after the 48h window elapses — agent calls to claim payment
+XcrowRouter(router).autoSettleViaRouter(jobId);
+// Reverts if: window not elapsed, no PoW submitted, or job was disputed
+```
+
+### Release payment (manual, client)
+
+```solidity
+// Client can settle at any time after completeJob — no PoW required
 XcrowRouter(router).settleAndPay(
     jobId,
     0,   // destinationDomain: 0 for same-chain settlement
@@ -281,7 +315,37 @@ const job = await publicClient.readContract({
 // 4 = Settled   5 = Disputed   6 = Cancelled   7 = Refunded   8 = Expired
 ```
 
-### Settle and release payment
+### Submit Proof of Work (agent)
+
+```typescript
+import { keccak256, toBytes } from "viem";
+
+// Hash the output content (or IPFS CID string)
+const proofHash = keccak256(toBytes(outputContent));
+
+// Call directly on escrow — msg.sender must be agentWallet
+await walletClient.writeContract({
+  address: XCROW_ESCROW,
+  abi: xcrowEscrowAbi,
+  functionName: "submitProofOfWork",
+  args: [jobId, proofHash],
+});
+// Starts 48h challenge window
+```
+
+### Trustless auto-settlement (after 48h window)
+
+```typescript
+// Anyone can call — agent calls to claim payment after window elapses
+await walletClient.writeContract({
+  address: XCROW_ROUTER,
+  abi: xcrowRouterAbi,
+  functionName: "autoSettleViaRouter",
+  args: [jobId],
+});
+```
+
+### Settle and release payment (client, manual)
 
 ```typescript
 await walletClient.writeContract({
@@ -366,7 +430,9 @@ ARC_RPC_URL=https://rpc.testnet.arc.network
 - `rejectJob` in the escrow has no auth check — authentication is enforced by the Router in `rejectJobViaRouter` before the call
 - `CrossChainSettler.settleCrossChain` is restricted to authorised callers
 - Dispute resolution is owner-arbitrated with a configurable timeout for automatic client refund
-- ERC-8004 `giveFeedback` calls in `settleAndPay` are wrapped in `try/catch` so a registry failure never blocks settlement
+- `submitProofOfWork` can only be called by the assigned `agentWallet` and only once per job
+- `autoSettle` checks that PoW was submitted and the full `settlementWindow` has elapsed; if the client disputes before the window closes, `autoSettle` is permanently blocked for that job
+- ERC-8004 `giveFeedback` calls in `settleAndPay` and `autoSettleViaRouter` are wrapped in `try/catch` so a registry failure never blocks settlement
 
 ---
 
