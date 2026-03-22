@@ -14,6 +14,8 @@ interface IXcrowEscrow {
     function disputeJob(uint256 jobId, string calldata reason) external;
     function cancelJob(uint256 jobId) external;
     function refundExpiredJob(uint256 jobId) external;
+    function submitProofOfWork(uint256 jobId, bytes32 proofHash) external;
+    function autoSettle(uint256 jobId) external;
     function getJob(uint256 jobId) external view returns (XcrowTypes.Job memory);
     function getClientJobs(address client) external view returns (uint256[] memory);
     function getAgentJobs(uint256 agentId) external view returns (uint256[] memory);
@@ -26,4 +28,5 @@ interface IXcrowEscrow {
     event JobDisputed(uint256 indexed jobId, address indexed disputedBy, string reason);
     event JobCancelled(uint256 indexed jobId);
     event JobRefunded(uint256 indexed jobId, uint256 refundAmount);
+    event ProofOfWorkSubmitted(uint256 indexed jobId, address indexed agentWallet, bytes32 proofHash);
 }

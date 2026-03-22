@@ -26,6 +26,8 @@ library XcrowTypes {
         uint256 deadline;
         uint256 createdAt;
         uint256 settledAt;
+        bytes32 proofOfWorkHash;  // keccak256 hash of agent output (0 if not yet submitted)
+        uint256 proofSubmittedAt; // timestamp when agent submitted PoW (0 if not yet submitted)
         JobStatus status;
         bool isCrossChain;
         uint32 destinationDomain;

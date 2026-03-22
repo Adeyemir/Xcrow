@@ -22,6 +22,7 @@ contract XcrowEscrowTest is Test {
     uint256 public constant JOB_AMOUNT = 100e6; // 100 USDC
     uint256 public constant PROTOCOL_FEE_BPS = 250; // 2.5%
     uint256 public constant DISPUTE_TIMEOUT = 3 days;
+    uint256 public constant SETTLEMENT_WINDOW = 48 hours;
 
     event JobCreated(uint256 indexed jobId, uint256 indexed agentId, address indexed client, uint256 amount);
 
@@ -29,7 +30,7 @@ contract XcrowEscrowTest is Test {
         usdc = new MockUSDC();
         registry = new MockIdentityRegistry();
 
-        escrow = new XcrowEscrow(address(usdc), address(registry), treasury, PROTOCOL_FEE_BPS, DISPUTE_TIMEOUT);
+        escrow = new XcrowEscrow(address(usdc), address(registry), treasury, PROTOCOL_FEE_BPS, DISPUTE_TIMEOUT, SETTLEMENT_WINDOW);
 
         // Register a mock agent
         agentId = registry.mockRegisterAgent(agentOwner, agentWallet, "ipfs://agent1");
@@ -656,5 +657,163 @@ contract XcrowEscrowTest is Test {
         vm.prank(agentWallet);
         escrow.completeJob(jobId);
         return jobId;
+    }
+
+    // =========================================
+    // submitProofOfWork tests
+    // =========================================
+
+    function test_submitProofOfWork_success() public {
+        uint256 jobId = _createAcceptAndComplete();
+        bytes32 proofHash = keccak256("output content");
+
+        vm.prank(agentWallet);
+        escrow.submitProofOfWork(jobId, proofHash);
+
+        XcrowTypes.Job memory job = escrow.getJob(jobId);
+        assertEq(job.proofOfWorkHash, proofHash);
+        assertGt(job.proofSubmittedAt, 0);
+        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Completed)); // status unchanged
+    }
+
+    function test_submitProofOfWork_revert_notAgent() public {
+        uint256 jobId = _createAcceptAndComplete();
+
+        vm.prank(client);
+        vm.expectRevert("Not agent wallet");
+        escrow.submitProofOfWork(jobId, keccak256("proof"));
+    }
+
+    function test_submitProofOfWork_revert_notCompleted() public {
+        uint256 jobId = _createAndAcceptJob(); // Accepted, not Completed
+
+        vm.prank(agentWallet);
+        vm.expectRevert("Job not completed");
+        escrow.submitProofOfWork(jobId, keccak256("proof"));
+    }
+
+    function test_submitProofOfWork_revert_alreadySubmitted() public {
+        uint256 jobId = _createAcceptAndComplete();
+
+        vm.prank(agentWallet);
+        escrow.submitProofOfWork(jobId, keccak256("proof"));
+
+        vm.prank(agentWallet);
+        vm.expectRevert("Proof already submitted");
+        escrow.submitProofOfWork(jobId, keccak256("different proof"));
+    }
+
+    function test_submitProofOfWork_revert_emptyHash() public {
+        uint256 jobId = _createAcceptAndComplete();
+
+        vm.prank(agentWallet);
+        vm.expectRevert("Proof hash required");
+        escrow.submitProofOfWork(jobId, bytes32(0));
+    }
+
+    // =========================================
+    // autoSettle tests
+    // =========================================
+
+    function test_autoSettle_success() public {
+        uint256 jobId = _createAcceptAndComplete();
+        bytes32 proofHash = keccak256("output");
+
+        uint256 expectedFee = (JOB_AMOUNT * PROTOCOL_FEE_BPS) / 10000;
+        uint256 expectedPayout = JOB_AMOUNT - expectedFee;
+        uint256 agentBalBefore = usdc.balanceOf(agentWallet);
+
+        vm.prank(agentWallet);
+        escrow.submitProofOfWork(jobId, proofHash);
+
+        // Warp past settlement window
+        vm.warp(block.timestamp + SETTLEMENT_WINDOW + 1);
+
+        address rando = makeAddr("rando");
+        vm.prank(rando);
+        escrow.autoSettle(jobId);
+
+        XcrowTypes.Job memory job = escrow.getJob(jobId);
+        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Settled));
+        assertGt(job.settledAt, 0);
+        assertEq(usdc.balanceOf(agentWallet), agentBalBefore + expectedPayout);
+        assertEq(escrow.accumulatedFees(), expectedFee);
+    }
+
+    function test_autoSettle_revert_noProof() public {
+        uint256 jobId = _createAcceptAndComplete();
+
+        vm.warp(block.timestamp + SETTLEMENT_WINDOW + 1);
+
+        vm.expectRevert("No proof of work submitted");
+        escrow.autoSettle(jobId);
+    }
+
+    function test_autoSettle_revert_windowNotElapsed() public {
+        uint256 jobId = _createAcceptAndComplete();
+
+        vm.prank(agentWallet);
+        escrow.submitProofOfWork(jobId, keccak256("proof"));
+
+        // Try immediately — window not elapsed
+        vm.expectRevert("Settlement window not elapsed");
+        escrow.autoSettle(jobId);
+    }
+
+    function test_autoSettle_revert_windowNotElapsed_justBefore() public {
+        uint256 jobId = _createAcceptAndComplete();
+
+        vm.prank(agentWallet);
+        escrow.submitProofOfWork(jobId, keccak256("proof"));
+
+        // Warp to 1 second before window closes
+        vm.warp(block.timestamp + SETTLEMENT_WINDOW - 1);
+
+        vm.expectRevert("Settlement window not elapsed");
+        escrow.autoSettle(jobId);
+    }
+
+    function test_autoSettle_revert_afterDispute() public {
+        uint256 jobId = _createAcceptAndComplete();
+
+        vm.prank(agentWallet);
+        escrow.submitProofOfWork(jobId, keccak256("proof"));
+
+        // Client disputes before window elapses
+        vm.prank(client);
+        escrow.disputeJob(jobId, "output is wrong");
+
+        vm.warp(block.timestamp + SETTLEMENT_WINDOW + 1);
+
+        // autoSettle must fail — job is now Disputed, not Completed
+        vm.expectRevert("Job not completed");
+        escrow.autoSettle(jobId);
+    }
+
+    function test_autoSettle_agentCanCallSelf() public {
+        uint256 jobId = _createAcceptAndComplete();
+
+        vm.prank(agentWallet);
+        escrow.submitProofOfWork(jobId, keccak256("proof"));
+
+        vm.warp(block.timestamp + SETTLEMENT_WINDOW + 1);
+
+        // Agent calls autoSettle on their own job
+        vm.prank(agentWallet);
+        escrow.autoSettle(jobId);
+
+        XcrowTypes.Job memory job = escrow.getJob(jobId);
+        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Settled));
+    }
+
+    function test_autoSettle_clientCanStillManualSettle_beforePoW() public {
+        uint256 jobId = _createAcceptAndComplete();
+
+        // Client settles manually without waiting for PoW — still works
+        vm.prank(client);
+        escrow.settleJob(jobId);
+
+        XcrowTypes.Job memory job = escrow.getJob(jobId);
+        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Settled));
     }
 }

@@ -30,6 +30,7 @@ contract XcrowRouterTest is Test {
 
     uint256 public agentId;
     uint256 public constant PROTOCOL_FEE_BPS = 250;
+    uint256 public constant SETTLEMENT_WINDOW = 48 hours;
 
     event AgentHired(
         uint256 indexed jobId, uint256 indexed agentId, address indexed client, uint256 amount, bool crossChain
@@ -42,7 +43,7 @@ contract XcrowRouterTest is Test {
         messenger = new MockTokenMessenger();
 
         // Deploy core contracts
-        escrow = new XcrowEscrow(address(usdc), address(identityReg), treasury, PROTOCOL_FEE_BPS, 3 days);
+        escrow = new XcrowEscrow(address(usdc), address(identityReg), treasury, PROTOCOL_FEE_BPS, 3 days, SETTLEMENT_WINDOW);
 
         pricer = new ReputationPricer(
             address(reputationReg),
@@ -326,7 +327,7 @@ contract XcrowRouterTest is Test {
     // =========================================
 
     function test_updateEscrow() public {
-        XcrowEscrow newEscrow = new XcrowEscrow(address(usdc), address(identityReg), treasury, 250, 3 days);
+        XcrowEscrow newEscrow = new XcrowEscrow(address(usdc), address(identityReg), treasury, 250, 3 days, SETTLEMENT_WINDOW);
         router.updateEscrow(address(newEscrow));
         assertEq(address(router.escrow()), address(newEscrow));
     }
@@ -433,5 +434,97 @@ contract XcrowRouterTest is Test {
 
         XcrowTypes.Job memory job = escrow.getJob(jobId);
         assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Disputed));
+    }
+
+    // =========================================
+    // autoSettleViaRouter tests
+    // =========================================
+
+    function test_autoSettleViaRouter_success() public {
+        // Hire via router
+        vm.startPrank(client);
+        usdc.approve(address(router), 100e6);
+        uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("auto settle task"), block.timestamp + 1 days);
+        vm.stopPrank();
+
+        // Agent accepts, completes, submits PoW directly on escrow
+        vm.prank(agentWallet);
+        escrow.acceptJob(jobId);
+        vm.prank(agentWallet);
+        escrow.completeJob(jobId);
+        vm.prank(agentWallet);
+        escrow.submitProofOfWork(jobId, keccak256("audit report output"));
+
+        // Warp past settlement window
+        vm.warp(block.timestamp + SETTLEMENT_WINDOW + 1);
+
+        // Agent triggers auto-settlement via router (also emits ERC-8004 feedback)
+        vm.prank(agentWallet);
+        router.autoSettleViaRouter(jobId);
+
+        XcrowTypes.Job memory job = escrow.getJob(jobId);
+        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Settled));
+        // Agent got paid (100 - 2.5% = 97.5)
+        assertEq(usdc.balanceOf(agentWallet), 97_500_000);
+    }
+
+    function test_autoSettleViaRouter_revert_windowNotElapsed() public {
+        vm.startPrank(client);
+        usdc.approve(address(router), 100e6);
+        uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("task"), block.timestamp + 1 days);
+        vm.stopPrank();
+
+        vm.prank(agentWallet);
+        escrow.acceptJob(jobId);
+        vm.prank(agentWallet);
+        escrow.completeJob(jobId);
+        vm.prank(agentWallet);
+        escrow.submitProofOfWork(jobId, keccak256("proof"));
+
+        // Try before window elapses
+        vm.prank(agentWallet);
+        vm.expectRevert("Settlement window not elapsed");
+        router.autoSettleViaRouter(jobId);
+    }
+
+    function test_autoSettleViaRouter_revert_noProof() public {
+        vm.startPrank(client);
+        usdc.approve(address(router), 100e6);
+        uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("task"), block.timestamp + 1 days);
+        vm.stopPrank();
+
+        vm.prank(agentWallet);
+        escrow.acceptJob(jobId);
+        vm.prank(agentWallet);
+        escrow.completeJob(jobId);
+
+        vm.warp(block.timestamp + SETTLEMENT_WINDOW + 1);
+
+        vm.expectRevert("No proof of work submitted");
+        router.autoSettleViaRouter(jobId);
+    }
+
+    function test_autoSettleViaRouter_revert_afterClientDispute() public {
+        vm.startPrank(client);
+        usdc.approve(address(router), 100e6);
+        uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("task"), block.timestamp + 1 days);
+        vm.stopPrank();
+
+        vm.prank(agentWallet);
+        escrow.acceptJob(jobId);
+        vm.prank(agentWallet);
+        escrow.completeJob(jobId);
+        vm.prank(agentWallet);
+        escrow.submitProofOfWork(jobId, keccak256("proof"));
+
+        // Client disputes before window elapses
+        vm.prank(client);
+        router.disputeJobViaRouter(jobId, "bad output");
+
+        vm.warp(block.timestamp + SETTLEMENT_WINDOW + 1);
+
+        // autoSettle blocked because job is now Disputed
+        vm.expectRevert("Job not completed");
+        router.autoSettleViaRouter(jobId);
     }
 }

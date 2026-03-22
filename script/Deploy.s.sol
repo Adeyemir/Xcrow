@@ -33,7 +33,7 @@ contract Deploy is Script {
         vm.startBroadcast(pk);
 
         // 1. Deploy core contracts against real ERC-8004 registries
-        XcrowEscrow escrow = new XcrowEscrow(USDC, ERC8004_IDENTITY, deployer, 250, 3 days);
+        XcrowEscrow escrow = new XcrowEscrow(USDC, ERC8004_IDENTITY, deployer, 250, 3 days, 2 days);
 
         ReputationPricer pricer = new ReputationPricer(ERC8004_REPUTATION, ERC8004_IDENTITY, 20000, 100, 3, "starred");
         pricer.addTrustedReviewer(deployer);

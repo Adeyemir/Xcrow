@@ -25,7 +25,8 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
     uint256 public protocolFeeBps; // Basis points (250 = 2.5%)
     uint256 public constant MAX_FEE_BPS = 1000; // 10% max
     address public treasury;
-    uint256 public disputeTimeout; // Seconds before auto-refund on dispute
+    uint256 public disputeTimeout;   // Seconds before auto-refund on dispute
+    uint256 public settlementWindow; // Seconds after PoW submission before auto-settlement is allowed
 
     mapping(uint256 => XcrowTypes.Job) public jobs;
     mapping(address => uint256[]) public clientJobs;
@@ -41,7 +42,8 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
         address _identityRegistry,
         address _treasury,
         uint256 _protocolFeeBps,
-        uint256 _disputeTimeout
+        uint256 _disputeTimeout,
+        uint256 _settlementWindow
     ) Ownable(msg.sender) {
         require(_usdc != address(0), "Invalid USDC address");
         require(_identityRegistry != address(0), "Invalid registry");
@@ -53,6 +55,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
         treasury = _treasury;
         protocolFeeBps = _protocolFeeBps;
         disputeTimeout = _disputeTimeout;
+        settlementWindow = _settlementWindow;
         nextJobId = 1;
     }
 
@@ -85,6 +88,8 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
             deadline: deadline,
             createdAt: block.timestamp,
             settledAt: 0,
+            proofOfWorkHash: bytes32(0),
+            proofSubmittedAt: 0,
             status: XcrowTypes.JobStatus.Created,
             isCrossChain: false,
             destinationDomain: 0
@@ -130,6 +135,8 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
             deadline: deadline,
             createdAt: block.timestamp,
             settledAt: 0,
+            proofOfWorkHash: bytes32(0),
+            proofSubmittedAt: 0,
             status: XcrowTypes.JobStatus.Created,
             isCrossChain: false,
             destinationDomain: 0
@@ -179,6 +186,8 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
             deadline: deadline,
             createdAt: block.timestamp,
             settledAt: 0,
+            proofOfWorkHash: bytes32(0),
+            proofSubmittedAt: 0,
             status: XcrowTypes.JobStatus.Created,
             isCrossChain: true,
             destinationDomain: destinationDomain
@@ -237,6 +246,42 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
 
         job.status = XcrowTypes.JobStatus.Completed;
         emit JobCompleted(jobId);
+    }
+
+    /// @notice Agent submits proof of work — anchors output hash on-chain and starts the settlement window
+    /// @param jobId The job to submit proof for
+    /// @param proofHash keccak256 hash of the agent's output (e.g., hash of IPFS CID or output content)
+    function submitProofOfWork(uint256 jobId, bytes32 proofHash) external nonReentrant {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(job.status == XcrowTypes.JobStatus.Completed, "Job not completed");
+        require(job.agentWallet == msg.sender, "Not agent wallet");
+        require(job.proofSubmittedAt == 0, "Proof already submitted");
+        require(proofHash != bytes32(0), "Proof hash required");
+
+        job.proofOfWorkHash = proofHash;
+        job.proofSubmittedAt = block.timestamp;
+
+        emit ProofOfWorkSubmitted(jobId, msg.sender, proofHash);
+    }
+
+    /// @notice Trustlessly settle a completed job once the settlement window has elapsed after PoW submission
+    /// @dev Client's only recourse is to call disputeJob before the window expires
+    /// @param jobId The job to auto-settle
+    function autoSettle(uint256 jobId) external nonReentrant {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(job.status == XcrowTypes.JobStatus.Completed, "Job not completed");
+        require(job.proofSubmittedAt > 0, "No proof of work submitted");
+        require(block.timestamp >= job.proofSubmittedAt + settlementWindow, "Settlement window not elapsed");
+
+        uint256 agentPayout = job.amount - job.platformFee;
+
+        job.status = XcrowTypes.JobStatus.Settled;
+        job.settledAt = block.timestamp;
+        accumulatedFees += job.platformFee;
+
+        usdc.safeTransfer(job.agentWallet, agentPayout);
+
+        emit JobSettled(jobId, agentPayout, job.platformFee);
     }
 
     /// @inheritdoc IXcrowEscrow

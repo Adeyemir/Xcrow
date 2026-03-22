@@ -306,6 +306,36 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
         escrow.disputeJob(jobId, reason);
     }
 
+    /// @notice Trigger trustless auto-settlement once the PoW window has elapsed
+    /// @dev Anyone can call — agent typically calls this to claim payment after the challenge window
+    ///      Also submits ERC-8004 proof-of-payment feedback on success
+    /// @param jobId Job to auto-settle (must have PoW submitted and window elapsed)
+    function autoSettleViaRouter(uint256 jobId) external nonReentrant whenNotPaused {
+        XcrowTypes.Job memory job = escrow.getJob(jobId);
+
+        // Settle on escrow — this handles all guards (PoW submitted, window elapsed, status check)
+        escrow.autoSettle(jobId);
+
+        // Auto-submit proof-of-payment feedback to ERC-8004 (same as settleAndPay)
+        uint256 reputationAgentId = jobERC8004AgentId[jobId] != 0 ? jobERC8004AgentId[jobId] : job.agentId;
+        if (reputationAgentId != 0) {
+            address jobClient = originalClient[jobId];
+            if (jobClient == address(0)) jobClient = job.client;
+            try reputationRegistry.giveFeedback(
+                reputationAgentId,
+                1,
+                0,
+                "",
+                "",
+                "",
+                "",
+                keccak256(abi.encode(jobClient, job.agentWallet, block.chainid, jobId))
+            ) {
+                emit FeedbackSubmitted(jobId, reputationAgentId, 1);
+            } catch {}
+        }
+    }
+
     /// @notice Submit feedback to ERC-8004 with proof of payment
     /// @param jobId Settled job to leave feedback for
     /// @param value Feedback value (e.g., 0-100)
