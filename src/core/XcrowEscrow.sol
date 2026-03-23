@@ -90,7 +90,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
             settledAt: 0,
             proofOfWorkHash: bytes32(0),
             proofSubmittedAt: 0,
-            status: XcrowTypes.JobStatus.Created,
+            status: XcrowTypes.JobStatus.InProgress,
             isCrossChain: false,
             destinationDomain: 0
         });
@@ -137,7 +137,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
             settledAt: 0,
             proofOfWorkHash: bytes32(0),
             proofSubmittedAt: 0,
-            status: XcrowTypes.JobStatus.Created,
+            status: XcrowTypes.JobStatus.InProgress,
             isCrossChain: false,
             destinationDomain: 0
         });
@@ -188,7 +188,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
             settledAt: 0,
             proofOfWorkHash: bytes32(0),
             proofSubmittedAt: 0,
-            status: XcrowTypes.JobStatus.Created,
+            status: XcrowTypes.JobStatus.InProgress,
             isCrossChain: true,
             destinationDomain: destinationDomain
         });
@@ -205,7 +205,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
     /// @notice Agent rejects a job — refund goes to refundRecipient (caller handles auth)
     function rejectJob(uint256 jobId, address refundRecipient) external nonReentrant {
         XcrowTypes.Job storage job = jobs[jobId];
-        require(job.status == XcrowTypes.JobStatus.Created, "Job not in Created state");
+        require(job.status == XcrowTypes.JobStatus.InProgress, "Job not in progress");
 
         job.status = XcrowTypes.JobStatus.Cancelled;
 
@@ -215,33 +215,9 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
     }
 
     /// @inheritdoc IXcrowEscrow
-    function acceptJob(uint256 jobId) external nonReentrant {
-        XcrowTypes.Job storage job = jobs[jobId];
-        require(job.status == XcrowTypes.JobStatus.Created, "Job not in Created state");
-        require(job.agentWallet == msg.sender, "Not agent wallet");
-        require(block.timestamp < job.deadline, "Job expired");
-
-        job.status = XcrowTypes.JobStatus.Accepted;
-        emit JobAccepted(jobId, job.agentId);
-    }
-
-    /// @inheritdoc IXcrowEscrow
-    function startJob(uint256 jobId) external nonReentrant {
-        XcrowTypes.Job storage job = jobs[jobId];
-        require(job.status == XcrowTypes.JobStatus.Accepted, "Job not Accepted");
-        require(job.agentWallet == msg.sender, "Not agent wallet");
-
-        job.status = XcrowTypes.JobStatus.InProgress;
-        emit JobStarted(jobId);
-    }
-
-    /// @inheritdoc IXcrowEscrow
     function completeJob(uint256 jobId) external nonReentrant {
         XcrowTypes.Job storage job = jobs[jobId];
-        require(
-            job.status == XcrowTypes.JobStatus.Accepted || job.status == XcrowTypes.JobStatus.InProgress,
-            "Job not in progress"
-        );
+        require(job.status == XcrowTypes.JobStatus.InProgress, "Job not in progress");
         require(job.agentWallet == msg.sender, "Not agent wallet");
 
         job.status = XcrowTypes.JobStatus.Completed;
@@ -308,8 +284,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
     function disputeJob(uint256 jobId, string calldata reason) external nonReentrant {
         XcrowTypes.Job storage job = jobs[jobId];
         require(
-            job.status == XcrowTypes.JobStatus.Accepted || job.status == XcrowTypes.JobStatus.InProgress
-                || job.status == XcrowTypes.JobStatus.Completed,
+            job.status == XcrowTypes.JobStatus.InProgress || job.status == XcrowTypes.JobStatus.Completed,
             "Cannot dispute in current state"
         );
         require(msg.sender == job.client || msg.sender == job.agentWallet, "Only client or agent can dispute");
@@ -321,7 +296,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
     /// @inheritdoc IXcrowEscrow
     function cancelJob(uint256 jobId) external nonReentrant {
         XcrowTypes.Job storage job = jobs[jobId];
-        require(job.status == XcrowTypes.JobStatus.Created, "Can only cancel Created jobs");
+        require(job.status == XcrowTypes.JobStatus.InProgress, "Can only cancel InProgress jobs");
         require(msg.sender == job.client, "Only client can cancel");
 
         job.status = XcrowTypes.JobStatus.Cancelled;
@@ -377,11 +352,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
     /// @inheritdoc IXcrowEscrow
     function refundExpiredJob(uint256 jobId) external nonReentrant {
         XcrowTypes.Job storage job = jobs[jobId];
-        require(
-            job.status == XcrowTypes.JobStatus.Created || job.status == XcrowTypes.JobStatus.Accepted
-                || job.status == XcrowTypes.JobStatus.InProgress,
-            "Cannot refund in current state"
-        );
+        require(job.status == XcrowTypes.JobStatus.InProgress, "Cannot refund in current state");
         require(block.timestamp > job.deadline, "Job not expired");
         // Only client can refund immediately; others must wait an extra grace period
         require(

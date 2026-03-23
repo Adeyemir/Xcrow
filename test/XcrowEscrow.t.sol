@@ -22,7 +22,7 @@ contract XcrowEscrowTest is Test {
     uint256 public constant JOB_AMOUNT = 100e6; // 100 USDC
     uint256 public constant PROTOCOL_FEE_BPS = 250; // 2.5%
     uint256 public constant DISPUTE_TIMEOUT = 3 days;
-    uint256 public constant SETTLEMENT_WINDOW = 48 hours;
+    uint256 public constant SETTLEMENT_WINDOW = 30 minutes;
 
     event JobCreated(uint256 indexed jobId, uint256 indexed agentId, address indexed client, uint256 amount);
 
@@ -62,7 +62,7 @@ contract XcrowEscrowTest is Test {
         assertEq(job.agentWallet, agentWallet);
         assertEq(job.amount, JOB_AMOUNT);
         assertEq(job.platformFee, (JOB_AMOUNT * PROTOCOL_FEE_BPS) / 10000);
-        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Created));
+        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.InProgress));
 
         // USDC transferred to escrow
         assertEq(usdc.balanceOf(address(escrow)), JOB_AMOUNT);
@@ -134,91 +134,11 @@ contract XcrowEscrowTest is Test {
     }
 
     // =========================================
-    // acceptJob tests
-    // =========================================
-
-    function test_acceptJob_success() public {
-        uint256 jobId = _createDefaultJob();
-
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
-
-        XcrowTypes.Job memory job = escrow.getJob(jobId);
-        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Accepted));
-    }
-
-    function test_acceptJob_revert_notAgent() public {
-        uint256 jobId = _createDefaultJob();
-
-        vm.prank(client);
-        vm.expectRevert("Not agent wallet");
-        escrow.acceptJob(jobId);
-    }
-
-    function test_acceptJob_revert_wrongState() public {
-        uint256 jobId = _createDefaultJob();
-
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
-
-        // Try to accept again
-        vm.prank(agentWallet);
-        vm.expectRevert("Job not in Created state");
-        escrow.acceptJob(jobId);
-    }
-
-    function test_acceptJob_revert_expired() public {
-        uint256 jobId = _createDefaultJob();
-
-        // Warp past deadline
-        vm.warp(block.timestamp + 2 days);
-
-        vm.prank(agentWallet);
-        vm.expectRevert("Job expired");
-        escrow.acceptJob(jobId);
-    }
-
-    // =========================================
-    // startJob tests
-    // =========================================
-
-    function test_startJob_success() public {
-        uint256 jobId = _createAndAcceptJob();
-
-        vm.prank(agentWallet);
-        escrow.startJob(jobId);
-
-        XcrowTypes.Job memory job = escrow.getJob(jobId);
-        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.InProgress));
-    }
-
-    function test_startJob_revert_notAccepted() public {
-        uint256 jobId = _createDefaultJob();
-
-        vm.prank(agentWallet);
-        vm.expectRevert("Job not Accepted");
-        escrow.startJob(jobId);
-    }
-
-    // =========================================
     // completeJob tests
     // =========================================
 
-    function test_completeJob_fromAccepted() public {
-        uint256 jobId = _createAndAcceptJob();
-
-        vm.prank(agentWallet);
-        escrow.completeJob(jobId);
-
-        XcrowTypes.Job memory job = escrow.getJob(jobId);
-        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Completed));
-    }
-
-    function test_completeJob_fromInProgress() public {
-        uint256 jobId = _createAndAcceptJob();
-
-        vm.prank(agentWallet);
-        escrow.startJob(jobId);
+    function test_completeJob_success() public {
+        uint256 jobId = _createDefaultJob();
 
         vm.prank(agentWallet);
         escrow.completeJob(jobId);
@@ -228,7 +148,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_completeJob_revert_notAgent() public {
-        uint256 jobId = _createAndAcceptJob();
+        uint256 jobId = _createDefaultJob();
 
         vm.prank(client);
         vm.expectRevert("Not agent wallet");
@@ -240,7 +160,7 @@ contract XcrowEscrowTest is Test {
     // =========================================
 
     function test_settleJob_success() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
 
         uint256 expectedFee = (JOB_AMOUNT * PROTOCOL_FEE_BPS) / 10000; // 2.5 USDC
         uint256 expectedPayout = JOB_AMOUNT - expectedFee; // 97.5 USDC
@@ -262,7 +182,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_settleJob_revert_notClient() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
 
         vm.prank(agentWallet);
         vm.expectRevert("Only client can settle");
@@ -270,7 +190,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_settleJob_revert_notCompleted() public {
-        uint256 jobId = _createAndAcceptJob();
+        uint256 jobId = _createDefaultJob();
 
         vm.prank(client);
         vm.expectRevert("Job not completed");
@@ -285,8 +205,6 @@ contract XcrowEscrowTest is Test {
         vm.prank(client);
         uint256 jobId = escrow.createJob(agentId, 11155111, amount, keccak256("big job"), block.timestamp + 1 days);
 
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
         vm.prank(agentWallet);
         escrow.completeJob(jobId);
         vm.prank(client);
@@ -314,11 +232,11 @@ contract XcrowEscrowTest is Test {
         assertEq(usdc.balanceOf(client), clientBalBefore + JOB_AMOUNT);
     }
 
-    function test_cancelJob_revert_afterAccept() public {
-        uint256 jobId = _createAndAcceptJob();
+    function test_cancelJob_revert_afterComplete() public {
+        uint256 jobId = _createAndCompleteJob();
 
         vm.prank(client);
-        vm.expectRevert("Can only cancel Created jobs");
+        vm.expectRevert("Can only cancel InProgress jobs");
         escrow.cancelJob(jobId);
     }
 
@@ -335,7 +253,7 @@ contract XcrowEscrowTest is Test {
     // =========================================
 
     function test_disputeJob_byClient() public {
-        uint256 jobId = _createAndAcceptJob();
+        uint256 jobId = _createDefaultJob();
 
         vm.prank(client);
         escrow.disputeJob(jobId, "Agent unresponsive");
@@ -345,7 +263,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_disputeJob_byAgent() public {
-        uint256 jobId = _createAndAcceptJob();
+        uint256 jobId = _createDefaultJob();
 
         vm.prank(agentWallet);
         escrow.disputeJob(jobId, "Client changed requirements");
@@ -355,7 +273,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_disputeJob_revert_outsider() public {
-        uint256 jobId = _createAndAcceptJob();
+        uint256 jobId = _createDefaultJob();
         address rando = makeAddr("rando");
 
         vm.prank(rando);
@@ -363,8 +281,11 @@ contract XcrowEscrowTest is Test {
         escrow.disputeJob(jobId, "not my business");
     }
 
-    function test_disputeJob_revert_createdState() public {
-        uint256 jobId = _createDefaultJob();
+    function test_disputeJob_revert_settledState() public {
+        uint256 jobId = _createAndCompleteJob();
+
+        vm.prank(client);
+        escrow.settleJob(jobId);
 
         vm.prank(client);
         vm.expectRevert("Cannot dispute in current state");
@@ -398,8 +319,8 @@ contract XcrowEscrowTest is Test {
         escrow.refundExpiredJob(jobId);
     }
 
-    function test_refundExpiredJob_afterAccepted() public {
-        uint256 jobId = _createAndAcceptJob();
+    function test_refundExpiredJob_inProgress() public {
+        uint256 jobId = _createDefaultJob();
 
         vm.warp(block.timestamp + 2 days);
 
@@ -442,7 +363,7 @@ contract XcrowEscrowTest is Test {
 
     function test_withdrawFees() public {
         // Complete a job to accumulate fees
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
         vm.prank(client);
         escrow.settleJob(jobId);
 
@@ -483,7 +404,7 @@ contract XcrowEscrowTest is Test {
     // =========================================
 
     function test_resolveDispute_afterTimeout() public {
-        uint256 jobId = _createAndAcceptJob();
+        uint256 jobId = _createDefaultJob();
         uint256 clientBalBefore = usdc.balanceOf(client);
 
         vm.prank(client);
@@ -501,7 +422,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_resolveDispute_revert_beforeTimeout() public {
-        uint256 jobId = _createAndAcceptJob();
+        uint256 jobId = _createDefaultJob();
 
         vm.prank(client);
         escrow.disputeJob(jobId, "reason");
@@ -512,7 +433,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_resolveDisputeByOwner_favorAgent() public {
-        uint256 jobId = _createAndAcceptJob();
+        uint256 jobId = _createDefaultJob();
         uint256 agentBalBefore = usdc.balanceOf(agentWallet);
 
         vm.prank(client);
@@ -531,7 +452,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_resolveDisputeByOwner_favorClient() public {
-        uint256 jobId = _createAndAcceptJob();
+        uint256 jobId = _createDefaultJob();
         uint256 clientBalBefore = usdc.balanceOf(client);
 
         vm.prank(client);
@@ -546,7 +467,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_resolveDisputeByOwner_revert_notOwner() public {
-        uint256 jobId = _createAndAcceptJob();
+        uint256 jobId = _createDefaultJob();
 
         vm.prank(client);
         escrow.disputeJob(jobId, "reason");
@@ -561,26 +482,24 @@ contract XcrowEscrowTest is Test {
     // =========================================
 
     function test_fullLifecycle() public {
-        // 1. Client creates job
+        // 1. Client creates job (starts as InProgress)
         vm.prank(client);
         uint256 jobId =
             escrow.createJob(agentId, 11155111, JOB_AMOUNT, keccak256("full test"), block.timestamp + 1 days);
 
-        // 2. Agent accepts
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
-
-        // 3. Agent starts work
-        vm.prank(agentWallet);
-        escrow.startJob(jobId);
-
-        // 4. Agent completes
+        // 2. Agent completes
         vm.prank(agentWallet);
         escrow.completeJob(jobId);
 
-        // 5. Client settles
-        vm.prank(client);
-        escrow.settleJob(jobId);
+        // 3. Agent submits proof of work
+        vm.prank(agentWallet);
+        escrow.submitProofOfWork(jobId, keccak256("output"));
+
+        // 4. Settlement window elapses
+        vm.warp(block.timestamp + SETTLEMENT_WINDOW + 1);
+
+        // 5. Auto-settle
+        escrow.autoSettle(jobId);
 
         // Verify final state
         XcrowTypes.Job memory job = escrow.getJob(jobId);
@@ -611,7 +530,7 @@ contract XcrowEscrowTest is Test {
         assertEq(job.amount, JOB_AMOUNT);
         assertTrue(job.isCrossChain);
         assertEq(job.destinationDomain, 6);
-        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Created));
+        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.InProgress));
     }
 
     function test_createCrossChainJob_revert_zeroDomain() public {
@@ -626,8 +545,6 @@ contract XcrowEscrowTest is Test {
             agentId, 11155111, JOB_AMOUNT, keccak256("cc task"), block.timestamp + 1 days, 6
         );
 
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
         vm.prank(agentWallet);
         escrow.completeJob(jobId);
         vm.prank(client);
@@ -647,15 +564,8 @@ contract XcrowEscrowTest is Test {
         return escrow.createJob(agentId, 11155111, JOB_AMOUNT, keccak256("test task"), block.timestamp + 1 days);
     }
 
-    function _createAndAcceptJob() internal returns (uint256) {
+    function _createAndCompleteJob() internal returns (uint256) {
         uint256 jobId = _createDefaultJob();
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
-        return jobId;
-    }
-
-    function _createAcceptAndComplete() internal returns (uint256) {
-        uint256 jobId = _createAndAcceptJob();
         vm.prank(agentWallet);
         escrow.completeJob(jobId);
         return jobId;
@@ -666,7 +576,7 @@ contract XcrowEscrowTest is Test {
     // =========================================
 
     function test_submitProofOfWork_success() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
         bytes32 proofHash = keccak256("output content");
 
         vm.prank(agentWallet);
@@ -679,7 +589,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_submitProofOfWork_revert_notAgent() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
 
         vm.prank(client);
         vm.expectRevert("Not agent wallet");
@@ -687,7 +597,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_submitProofOfWork_revert_notCompleted() public {
-        uint256 jobId = _createAndAcceptJob(); // Accepted, not Completed
+        uint256 jobId = _createDefaultJob(); // InProgress, not Completed
 
         vm.prank(agentWallet);
         vm.expectRevert("Job not completed");
@@ -695,7 +605,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_submitProofOfWork_revert_alreadySubmitted() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
 
         vm.prank(agentWallet);
         escrow.submitProofOfWork(jobId, keccak256("proof"));
@@ -706,7 +616,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_submitProofOfWork_revert_emptyHash() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
 
         vm.prank(agentWallet);
         vm.expectRevert("Proof hash required");
@@ -718,7 +628,7 @@ contract XcrowEscrowTest is Test {
     // =========================================
 
     function test_autoSettle_success() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
         bytes32 proofHash = keccak256("output");
 
         uint256 expectedFee = (JOB_AMOUNT * PROTOCOL_FEE_BPS) / 10000;
@@ -743,7 +653,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_autoSettle_revert_noProof() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
 
         vm.warp(block.timestamp + SETTLEMENT_WINDOW + 1);
 
@@ -752,7 +662,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_autoSettle_revert_windowNotElapsed() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
 
         vm.prank(agentWallet);
         escrow.submitProofOfWork(jobId, keccak256("proof"));
@@ -763,7 +673,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_autoSettle_revert_windowNotElapsed_justBefore() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
 
         vm.prank(agentWallet);
         escrow.submitProofOfWork(jobId, keccak256("proof"));
@@ -776,7 +686,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_autoSettle_revert_afterDispute() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
 
         vm.prank(agentWallet);
         escrow.submitProofOfWork(jobId, keccak256("proof"));
@@ -793,7 +703,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_autoSettle_agentCanCallSelf() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
 
         vm.prank(agentWallet);
         escrow.submitProofOfWork(jobId, keccak256("proof"));
@@ -809,7 +719,7 @@ contract XcrowEscrowTest is Test {
     }
 
     function test_autoSettle_clientCanStillManualSettle_beforePoW() public {
-        uint256 jobId = _createAcceptAndComplete();
+        uint256 jobId = _createAndCompleteJob();
 
         // Client settles manually without waiting for PoW — still works
         vm.prank(client);

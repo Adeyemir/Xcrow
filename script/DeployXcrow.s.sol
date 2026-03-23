@@ -20,8 +20,9 @@ contract DeployXcrow is Script {
         MockIdentityRegistry idReg = new MockIdentityRegistry();
         MockReputationRegistry repReg = new MockReputationRegistry(address(idReg));
 
-        XcrowEscrow escrow =
-            new XcrowEscrow(0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238, address(idReg), deployer, 250, 3 days, 2 days);
+        XcrowEscrow escrow = new XcrowEscrow(
+            0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238, address(idReg), deployer, 250, 3 days, 30 minutes
+        );
 
         ReputationPricer pricer = new ReputationPricer(address(repReg), address(idReg), 20000, 100, 3, "starred");
         pricer.addTrustedReviewer(deployer);

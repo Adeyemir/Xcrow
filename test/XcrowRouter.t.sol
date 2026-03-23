@@ -30,7 +30,7 @@ contract XcrowRouterTest is Test {
 
     uint256 public agentId;
     uint256 public constant PROTOCOL_FEE_BPS = 250;
-    uint256 public constant SETTLEMENT_WINDOW = 48 hours;
+    uint256 public constant SETTLEMENT_WINDOW = 30 minutes;
 
     event AgentHired(
         uint256 indexed jobId, uint256 indexed agentId, address indexed client, uint256 amount, bool crossChain
@@ -147,7 +147,7 @@ contract XcrowRouterTest is Test {
         assertEq(job.agentId, agentId);
         assertEq(job.amount, 100e6);
         assertEq(job.client, address(router)); // Router is the escrow client
-        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Created));
+        assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.InProgress));
 
         // USDC moved from client → router → escrow
         assertEq(usdc.balanceOf(address(escrow)), 100e6);
@@ -203,8 +203,6 @@ contract XcrowRouterTest is Test {
 
         // Agent accepts and completes (on escrow directly — job.client is router)
         vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
-        vm.prank(agentWallet);
         escrow.completeJob(jobId);
 
         // Client settles via router — should work because originalClient[jobId] = client
@@ -225,8 +223,6 @@ contract XcrowRouterTest is Test {
         uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("feedback test"), block.timestamp + 1 days);
         vm.stopPrank();
 
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
         vm.prank(agentWallet);
         escrow.completeJob(jobId);
 
@@ -250,8 +246,6 @@ contract XcrowRouterTest is Test {
         vm.stopPrank();
 
         vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
-        vm.prank(agentWallet);
         escrow.completeJob(jobId);
 
         // Random user tries to settle — should fail
@@ -273,8 +267,6 @@ contract XcrowRouterTest is Test {
         vm.stopPrank();
 
         // Agent accepts and completes
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
         vm.prank(agentWallet);
         escrow.completeJob(jobId);
 
@@ -298,8 +290,6 @@ contract XcrowRouterTest is Test {
         uint256 jobId = escrow.createJob(agentId, 11155111, 100e6, keccak256("feedback test"), block.timestamp + 1 days);
         vm.stopPrank();
 
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
         vm.prank(agentWallet);
         escrow.completeJob(jobId);
         vm.prank(client);
@@ -385,8 +375,6 @@ contract XcrowRouterTest is Test {
 
         // Agent accepts and completes
         vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
-        vm.prank(agentWallet);
         escrow.completeJob(jobId);
 
         // Client settles via router (same-chain settle, cross-chain bridging would need funded router)
@@ -428,9 +416,6 @@ contract XcrowRouterTest is Test {
         uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("dispute task"), block.timestamp + 1 days);
         vm.stopPrank();
 
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
-
         vm.prank(client);
         router.disputeJobViaRouter(jobId, "not done");
 
@@ -450,8 +435,6 @@ contract XcrowRouterTest is Test {
         vm.stopPrank();
 
         // Agent accepts, completes, submits PoW directly on escrow
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
         vm.prank(agentWallet);
         escrow.completeJob(jobId);
         vm.prank(agentWallet);
@@ -477,8 +460,6 @@ contract XcrowRouterTest is Test {
         vm.stopPrank();
 
         vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
-        vm.prank(agentWallet);
         escrow.completeJob(jobId);
         vm.prank(agentWallet);
         escrow.submitProofOfWork(jobId, keccak256("proof"));
@@ -496,8 +477,6 @@ contract XcrowRouterTest is Test {
         vm.stopPrank();
 
         vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
-        vm.prank(agentWallet);
         escrow.completeJob(jobId);
 
         vm.warp(block.timestamp + SETTLEMENT_WINDOW + 1);
@@ -512,8 +491,6 @@ contract XcrowRouterTest is Test {
         uint256 jobId = router.hireAgent(agentId, 100e6, keccak256("task"), block.timestamp + 1 days);
         vm.stopPrank();
 
-        vm.prank(agentWallet);
-        escrow.acceptJob(jobId);
         vm.prank(agentWallet);
         escrow.completeJob(jobId);
         vm.prank(agentWallet);
