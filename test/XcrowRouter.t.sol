@@ -213,7 +213,7 @@ contract XcrowRouterTest is Test {
         assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Settled));
 
         // Agent got paid (100 - 2.5% = 97.5)
-        assertEq(usdc.balanceOf(agentWallet), 97_500_000);
+        assertEq(usdc.balanceOf(agentOwner), 97_500_000);
     }
 
     function test_router_submitFeedback_delegation() public {
@@ -280,7 +280,7 @@ contract XcrowRouterTest is Test {
         assertEq(job.client, client); // Direct client, not router
 
         // Agent got paid (100 - 2.5% fee = 97.5)
-        assertEq(usdc.balanceOf(agentWallet), 97_500_000);
+        assertEq(usdc.balanceOf(agentOwner), 97_500_000);
     }
 
     function test_directEscrow_withFeedback() public {
@@ -450,7 +450,7 @@ contract XcrowRouterTest is Test {
         XcrowTypes.Job memory job = escrow.getJob(jobId);
         assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Settled));
         // Agent got paid (100 - 2.5% = 97.5)
-        assertEq(usdc.balanceOf(agentWallet), 97_500_000);
+        assertEq(usdc.balanceOf(agentOwner), 97_500_000);
     }
 
     function test_autoSettleViaRouter_revert_windowNotElapsed() public {

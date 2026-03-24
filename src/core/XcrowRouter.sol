@@ -67,8 +67,8 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
 
     // --- Core Functions ---
 
-    /// @notice Hire an agent by wallet address with EIP-2612 permit — no ERC-8004 ID needed
-    /// @param erc8004AgentId The agent's ERC-8004 token ID for reputation tracking (0 if unknown)
+    /// @notice Hire an agent by wallet address with EIP-2612 permit
+    /// @param erc8004AgentId The agent's ERC-8004 token ID (required for payout routing)
     function hireAgentByWalletWithPermit(
         address agentWallet,
         uint256 amount,
@@ -80,13 +80,14 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
         bytes32 r,
         bytes32 s
     ) external nonReentrant whenNotPaused returns (uint256 jobId) {
+        require(erc8004AgentId > 0, "Agent ID required");
         IERC20Permit(address(usdc)).permit(msg.sender, address(this), amount, permitDeadline, v, r, s);
         usdc.safeTransferFrom(msg.sender, address(this), amount);
         usdc.forceApprove(address(escrow), amount);
 
-        jobId = escrow.createJobByWallet(agentWallet, amount, taskHash, deadline);
+        jobId = escrow.createJobByWallet(agentWallet, amount, taskHash, deadline, erc8004AgentId);
         originalClient[jobId] = msg.sender;
-        if (erc8004AgentId != 0) jobERC8004AgentId[jobId] = erc8004AgentId;
+        jobERC8004AgentId[jobId] = erc8004AgentId;
 
         emit AgentHired(jobId, erc8004AgentId, msg.sender, amount, false);
     }
@@ -256,8 +257,10 @@ contract XcrowRouter is ReentrancyGuard, Pausable, Ownable {
             // Transfer USDC to settler for cross-chain bridging
             usdc.safeTransfer(address(settler), agentPayout);
 
-            // Convert agent wallet to bytes32 for CCTP
-            bytes32 mintRecipient = bytes32(uint256(uint160(job.agentWallet)));
+            // Convert agent owner to bytes32 for CCTP — payment goes to owner, not agent wallet
+            address agentOwner = identityRegistry.ownerOf(job.agentId);
+            require(agentOwner != address(0), "Agent owner not found");
+            bytes32 mintRecipient = bytes32(uint256(uint160(agentOwner)));
 
             // Initiate cross-chain settlement
             uint64 nonce = settler.settleCrossChain(jobId, agentPayout, destinationDomain, mintRecipient, hookData);

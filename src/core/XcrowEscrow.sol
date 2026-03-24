@@ -59,10 +59,27 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
         nextJobId = 1;
     }
 
+    // --- Internal Helpers ---
+
+    /// @notice Resolve the payout address for a job — always the agent owner's wallet
+    /// @dev Agent wallet signs completions; owner wallet receives payment
+    function _resolvePayoutAddress(uint256 agentId) internal view returns (address) {
+        address ownerAddr = identityRegistry.ownerOf(agentId);
+        require(ownerAddr != address(0), "Agent owner not found");
+        return ownerAddr;
+    }
+
     // --- Core Functions ---
 
-    /// @notice Create a job by specifying the agent's wallet address directly (no ERC-8004 lookup needed)
-    function createJobByWallet(address agentWallet, uint256 amount, bytes32 taskHash, uint256 deadline)
+    /// @notice Create a job by specifying the agent's wallet address directly
+    /// @dev agentId is required so payout can be routed to the agent owner
+    function createJobByWallet(
+        address agentWallet,
+        uint256 amount,
+        bytes32 taskHash,
+        uint256 deadline,
+        uint256 agentId
+    )
         external
         nonReentrant
         whenNotPaused
@@ -72,13 +89,14 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
         require(deadline > block.timestamp, "Deadline must be future");
         require(taskHash != bytes32(0), "Task hash required");
         require(agentWallet != address(0), "Invalid agent wallet");
+        require(agentId > 0, "Agent ID required");
 
         uint256 platformFee = (amount * protocolFeeBps) / 10000;
         jobId = nextJobId++;
 
         jobs[jobId] = XcrowTypes.Job({
             jobId: jobId,
-            agentId: 0,
+            agentId: agentId,
             agentChainId: uint32(block.chainid),
             client: msg.sender,
             agentWallet: agentWallet,
@@ -96,10 +114,11 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
         });
 
         clientJobs[msg.sender].push(jobId);
+        agentJobs[agentId].push(jobId);
         agentWalletJobs[agentWallet].push(jobId);
 
         usdc.safeTransferFrom(msg.sender, address(this), amount);
-        emit JobCreated(jobId, 0, msg.sender, amount);
+        emit JobCreated(jobId, agentId, msg.sender, amount);
     }
 
     /// @inheritdoc IXcrowEscrow
@@ -250,12 +269,13 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
         require(block.timestamp >= job.proofSubmittedAt + settlementWindow, "Settlement window not elapsed");
 
         uint256 agentPayout = job.amount - job.platformFee;
+        address payoutAddress = _resolvePayoutAddress(job.agentId);
 
         job.status = XcrowTypes.JobStatus.Settled;
         job.settledAt = block.timestamp;
         accumulatedFees += job.platformFee;
 
-        usdc.safeTransfer(job.agentWallet, agentPayout);
+        usdc.safeTransfer(payoutAddress, agentPayout);
 
         emit JobSettled(jobId, agentPayout, job.platformFee);
     }
@@ -267,6 +287,7 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
         require(msg.sender == job.client, "Only client can settle");
 
         uint256 agentPayout = job.amount - job.platformFee;
+        address payoutAddress = _resolvePayoutAddress(job.agentId);
 
         job.status = XcrowTypes.JobStatus.Settled;
         job.settledAt = block.timestamp;
@@ -274,8 +295,8 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
         // Accumulate protocol fees
         accumulatedFees += job.platformFee;
 
-        // Pay the agent
-        usdc.safeTransfer(job.agentWallet, agentPayout);
+        // Pay the agent owner
+        usdc.safeTransfer(payoutAddress, agentPayout);
 
         emit JobSettled(jobId, agentPayout, job.platformFee);
     }
@@ -337,10 +358,11 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
 
         if (favorAgent) {
             uint256 agentPayout = job.amount - job.platformFee;
+            address payoutAddress = _resolvePayoutAddress(job.agentId);
             job.status = XcrowTypes.JobStatus.Settled;
             job.settledAt = block.timestamp;
             accumulatedFees += job.platformFee;
-            usdc.safeTransfer(job.agentWallet, agentPayout);
+            usdc.safeTransfer(payoutAddress, agentPayout);
             emit JobSettled(jobId, agentPayout, job.platformFee);
         } else {
             job.status = XcrowTypes.JobStatus.Refunded;

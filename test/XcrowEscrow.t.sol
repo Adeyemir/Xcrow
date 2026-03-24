@@ -165,7 +165,7 @@ contract XcrowEscrowTest is Test {
         uint256 expectedFee = (JOB_AMOUNT * PROTOCOL_FEE_BPS) / 10000; // 2.5 USDC
         uint256 expectedPayout = JOB_AMOUNT - expectedFee; // 97.5 USDC
 
-        uint256 agentBalBefore = usdc.balanceOf(agentWallet);
+        uint256 agentBalBefore = usdc.balanceOf(agentOwner);
 
         vm.prank(client);
         escrow.settleJob(jobId);
@@ -175,7 +175,7 @@ contract XcrowEscrowTest is Test {
         assertGt(job.settledAt, 0);
 
         // Agent got paid
-        assertEq(usdc.balanceOf(agentWallet), agentBalBefore + expectedPayout);
+        assertEq(usdc.balanceOf(agentOwner), agentBalBefore + expectedPayout);
 
         // Fees accumulated
         assertEq(escrow.accumulatedFees(), expectedFee);
@@ -434,7 +434,7 @@ contract XcrowEscrowTest is Test {
 
     function test_resolveDisputeByOwner_favorAgent() public {
         uint256 jobId = _createDefaultJob();
-        uint256 agentBalBefore = usdc.balanceOf(agentWallet);
+        uint256 agentBalBefore = usdc.balanceOf(agentOwner);
 
         vm.prank(client);
         escrow.disputeJob(jobId, "disagreement");
@@ -447,7 +447,7 @@ contract XcrowEscrowTest is Test {
 
         XcrowTypes.Job memory job = escrow.getJob(jobId);
         assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Settled));
-        assertEq(usdc.balanceOf(agentWallet), agentBalBefore + expectedPayout);
+        assertEq(usdc.balanceOf(agentOwner), agentBalBefore + expectedPayout);
         assertEq(escrow.accumulatedFees(), expectedFee);
     }
 
@@ -508,7 +508,7 @@ contract XcrowEscrowTest is Test {
         uint256 expectedFee = (JOB_AMOUNT * PROTOCOL_FEE_BPS) / 10000;
         uint256 expectedPayout = JOB_AMOUNT - expectedFee;
 
-        assertEq(usdc.balanceOf(agentWallet), expectedPayout);
+        assertEq(usdc.balanceOf(agentOwner), expectedPayout);
         assertEq(escrow.accumulatedFees(), expectedFee);
 
         // 6. Owner withdraws fees
@@ -633,7 +633,7 @@ contract XcrowEscrowTest is Test {
 
         uint256 expectedFee = (JOB_AMOUNT * PROTOCOL_FEE_BPS) / 10000;
         uint256 expectedPayout = JOB_AMOUNT - expectedFee;
-        uint256 agentBalBefore = usdc.balanceOf(agentWallet);
+        uint256 agentBalBefore = usdc.balanceOf(agentOwner);
 
         vm.prank(agentWallet);
         escrow.submitProofOfWork(jobId, proofHash);
@@ -648,7 +648,7 @@ contract XcrowEscrowTest is Test {
         XcrowTypes.Job memory job = escrow.getJob(jobId);
         assertEq(uint8(job.status), uint8(XcrowTypes.JobStatus.Settled));
         assertGt(job.settledAt, 0);
-        assertEq(usdc.balanceOf(agentWallet), agentBalBefore + expectedPayout);
+        assertEq(usdc.balanceOf(agentOwner), agentBalBefore + expectedPayout);
         assertEq(escrow.accumulatedFees(), expectedFee);
     }
 
