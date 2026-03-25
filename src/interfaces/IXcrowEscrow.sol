@@ -9,6 +9,7 @@ interface IXcrowEscrow {
         returns (uint256 jobId);
     function completeJob(uint256 jobId) external;
     function settleJob(uint256 jobId) external;
+    function completeAndSettle(uint256 jobId) external;
     function disputeJob(uint256 jobId, string calldata reason) external;
     function cancelJob(uint256 jobId) external;
     function refundExpiredJob(uint256 jobId) external;

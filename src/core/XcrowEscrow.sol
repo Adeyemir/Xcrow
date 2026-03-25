@@ -301,6 +301,26 @@ contract XcrowEscrow is IXcrowEscrow, ReentrancyGuard, Pausable, Ownable {
         emit JobSettled(jobId, agentPayout, job.platformFee);
     }
 
+    /// @notice Platform completes and settles a job in one atomic transaction
+    /// @dev Only callable by the contract owner (platform). Used for automatic settlement after agent delivers output.
+    /// @param jobId The job to complete and settle
+    function completeAndSettle(uint256 jobId) external nonReentrant onlyOwner {
+        XcrowTypes.Job storage job = jobs[jobId];
+        require(job.status == XcrowTypes.JobStatus.InProgress, "Job not in progress");
+
+        uint256 agentPayout = job.amount - job.platformFee;
+        address payoutAddress = _resolvePayoutAddress(job.agentId);
+
+        job.status = XcrowTypes.JobStatus.Settled;
+        job.settledAt = block.timestamp;
+        accumulatedFees += job.platformFee;
+
+        usdc.safeTransfer(payoutAddress, agentPayout);
+
+        emit JobCompleted(jobId);
+        emit JobSettled(jobId, agentPayout, job.platformFee);
+    }
+
     /// @inheritdoc IXcrowEscrow
     function disputeJob(uint256 jobId, string calldata reason) external nonReentrant {
         XcrowTypes.Job storage job = jobs[jobId];
