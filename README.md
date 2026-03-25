@@ -1,16 +1,16 @@
 # Xcrow Protocol
 
-Xcrow is a trustless USDC escrow protocol for the AI agent economy, built on Arc Network. It enables clients to hire AI agents, lock payment in escrow, and release funds only after work is delivered — with on-chain reputation tracking via ERC-8004 and cross-chain settlement via CCTP V2.
+Xcrow is a trustless USDC escrow protocol for the AI agent economy, built on Arc Network. It enables clients to hire AI agents, lock payment in escrow, and release funds automatically after work is delivered — with on-chain reputation tracking via ERC-8004 and cross-chain settlement via CCTP V2.
 
 ---
 
 ## Overview
 
-When a client hires an AI agent, two problems arise: the client risks paying upfront for work that is never delivered, and the agent risks completing work they are never paid for. Xcrow eliminates both risks by holding USDC in escrow for the duration of the job and releasing it trustlessly once the agent delivers.
+When a client hires an AI agent, two problems arise: the client risks paying upfront for work that is never delivered, and the agent risks completing work they are never paid for. Xcrow eliminates both risks by holding USDC in escrow for the duration of the job and releasing it once the agent delivers.
 
-When an agent completes a job, they submit a `proofOfWorkHash` — a keccak256 hash of their output — anchoring the delivery on-chain. This starts a 48-hour challenge window during which the client can dispute. If the client does not dispute, anyone can call `autoSettle` to release payment to the agent without requiring any further client action. Clients retain full control: they can settle manually at any time, or dispute to block auto-settlement.
+The default flow is fully automatic: the client hires an agent, the platform executes the task, and `completeAndSettle` releases payment to the agent in a single atomic transaction. No manual steps are required from either party. Clients retain full control — they can cancel before delivery or dispute to block payment.
 
-Every settled job writes a permanent reputation signal to the Arc ERC-8004 Reputation Registry. Over time, agents with strong track records command higher rates through reputation-weighted pricing. Clients can additionally submit star ratings after settlement, building a verifiable, tamper-proof history for each agent on-chain.
+Every settled job writes a permanent reputation signal to the Arc ERC-8004 Reputation Registry. Over time, agents with strong track records command higher rates through reputation-weighted pricing. Clients can additionally submit star ratings after settlement.
 
 ---
 
@@ -19,7 +19,7 @@ Every settled job writes a permanent reputation signal to the Arc ERC-8004 Reput
 ```mermaid
 graph TD
     Client([Client])
-    Agent([Agent])
+    Platform([Platform Server])
 
     subgraph Xcrow Protocol
         Router[XcrowRouter]
@@ -38,20 +38,12 @@ graph TD
 
     Client -->|"hireAgentByWalletWithPermit\n(EIP-2612 permit + USDC lock)"| Router
     Router -->|createJobByWallet| Escrow
-    Router -..->|originalClient mapping| Router
 
-    Agent -->|acceptJob| Escrow
-    Agent -->|startJob| Escrow
-    Agent -->|completeJob| Escrow
-    Agent -->|"submitProofOfWork\n(output hash on-chain)"| Escrow
+    Platform -->|"completeAndSettle\n(atomic complete + pay)"| Escrow
+    Escrow -->|transfer USDC| Identity
 
-    Client -->|settleAndPay| Router
-    Router -->|settleJob| Escrow
-    Escrow -->|transfer USDC| Agent
-
-    Agent -->|"autoSettleViaRouter\n(after 48h window)"| Router
-    Router -->|autoSettle| Escrow
-    Client -.->|"disputeJobViaRouter\n(blocks auto-settle)"| Router
+    Client -.->|"cancelJobViaRouter\n(before delivery)"| Router
+    Client -.->|"disputeJobViaRouter\n(blocks payment)"| Router
 
     Router -->|"giveFeedback\n(proof-of-payment)"| Reputation
     Client -->|submitFeedback| Router
@@ -71,7 +63,7 @@ graph TD
 | Contract | Responsibility |
 |---|---|
 | `XcrowRouter` | Single entry point for all client-facing interactions. Orchestrates the escrow, pricer, and cross-chain settler. Maintains the `originalClient` mapping so refunds and feedback always reach the correct wallet. |
-| `XcrowEscrow` | Holds USDC for the duration of a job. Enforces the job lifecycle state machine and accumulates protocol fees. |
+| `XcrowEscrow` | Holds USDC for the duration of a job. Enforces the job lifecycle state machine and accumulates protocol fees. Includes `completeAndSettle` for platform-driven instant settlement. |
 | `ReputationPricer` | Reads ERC-8004 reputation scores from trusted reviewers and computes reputation-weighted price quotes. |
 | `CrossChainSettler` | Burns USDC on Arc via CCTP V2 and instructs Circle to mint on the agent's destination chain. |
 
@@ -88,24 +80,22 @@ graph TD
 ## Job Lifecycle
 
 ```
-Created -> Accepted -> InProgress -> Completed --(PoW submitted)--> [48h window] --> Settled (auto)
-                                              |                                   -> Disputed -> blocks auto-settle
-                                              -> Settled (client settles manually at any time)
-                                              -> Disputed -> Refunded (auto, after disputeTimeout)
-                                                          -> Settled  (owner resolves in agent's favor)
-        -> Cancelled  (client cancels or agent rejects before acceptance)
-        -> Expired    (deadline passed with no completion)
+Created (InProgress) --> Settled (platform calls completeAndSettle after agent delivers)
+                     --> Cancelled (client cancels before delivery)
+                     --> Disputed --> Refunded (auto, after disputeTimeout)
+                                  --> Settled  (owner resolves in agent's favor)
+                     --> Expired  (deadline passed with no completion)
 ```
+
+The primary flow is **instant**: the platform server calls `completeAndSettle` as soon as the agent delivers output. This atomically marks the job complete and releases payment to the agent owner — no waiting, no manual steps.
+
+Legacy flows (`completeJob` + `settleJob`, `submitProofOfWork` + `autoSettle`) remain in the contract for flexibility but are not used in the default integration.
 
 | Transition | Who triggers it | Function |
 |---|---|---|
-| Created | Client | `hireAgentByWalletWithPermit` |
-| Accepted | Agent | `acceptJob` |
-| InProgress | Agent | `startJob` |
-| Completed | Agent | `completeJob` |
-| Proof submitted | Agent | `submitProofOfWork` (escrow direct) |
-| Settled (manual) | Client | `settleAndPay` |
-| Settled (auto) | Anyone after 48h window | `autoSettleViaRouter` |
+| Created (InProgress) | Client | `hireAgentByWalletWithPermit` (via Router) |
+| Settled (instant) | Platform | `completeAndSettle` (owner-only, atomic) |
+| Settled (manual) | Client | `settleAndPay` (via Router) |
 | Cancelled (client) | Client | `cancelJobViaRouter` |
 | Cancelled (agent) | Agent | `rejectJobViaRouter` |
 | Disputed | Client or Agent | `disputeJobViaRouter` |
@@ -118,8 +108,10 @@ Created -> Accepted -> InProgress -> Completed --(PoW submitted)--> [48h window]
 
 | Contract | Address |
 |---|---|
-| XcrowEscrow | `0x183B77E415931335ac746e59c17E88d1279a241f` |
-| XcrowRouter | `0x2EE65b29Fb04F59263b3A902cD3205C62e3a0231` |
+| XcrowEscrow | `0x165a9040dC9C31be0bDeEd142a63Dd0210998F4D` |
+| XcrowRouter | `0xb8b5d656660d2Cde7CDebAEbcb0bD4e5A153B887` |
+| ReputationPricer | `0x7bE3BD8996140275c34BD2C3F606Adac9d3CCEA6` |
+| CrossChainSettler | `0x421cFe5a9371B45aA300EBCFB88181a11Be826aB` |
 | ERC-8004 IdentityRegistry | `0x8004A818BFB912233c491871b3d84c89A494BD9e` |
 | ERC-8004 ReputationRegistry | `0x8004B663056A597Dffe9eCcC1965A193B7388713` |
 | USDC | `0x3600000000000000000000000000000000000000` |
@@ -130,9 +122,13 @@ Chain ID: `5042002`
 
 ## Key Design Decisions
 
+**Instant platform settlement**
+
+The primary settlement path is `completeAndSettle`, an owner-only function that atomically completes and settles a job in one transaction. The platform server calls this immediately after the agent delivers output. No waiting period, no manual steps — the agent gets paid instantly.
+
 **Wallet-based hiring**
 
-`hireAgentByWalletWithPermit` hires an agent by wallet address directly. Clients do not need to know an agent's ERC-8004 token ID. The ID can be passed separately for reputation tracking and can be `0` if unknown.
+`hireAgentByWalletWithPermit` hires an agent by wallet address directly. Clients do not need to know an agent's ERC-8004 token ID. The ID can be passed separately for reputation tracking.
 
 **EIP-2612 Permit**
 
@@ -142,15 +138,13 @@ Hiring is a single transaction. The client signs a permit off-chain to authorise
 
 When a job is created via the Router, `job.client` in the escrow is the Router address, not the user's wallet. The Router maintains an `originalClient` mapping so that all cancellations, settlements, and refunds are correctly forwarded to the actual client. This also allows the Router to be upgraded independently of the Escrow.
 
-**Proof of Work and trustless auto-settlement**
+**Payout to agent owner**
 
-When an agent completes a job, they call `submitProofOfWork(jobId, proofHash)` directly on the escrow. `proofHash` is `keccak256` of the output content, anchoring delivery on-chain. This starts a 48-hour challenge window (`settlementWindow`, configurable by the owner).
-
-During the window the client can call `disputeJobViaRouter` to block payment. If no dispute is raised, anyone — typically the agent — calls `autoSettleViaRouter` to release payment trustlessly. The client can also settle manually via `settleAndPay` at any time, with or without a PoW submission.
+Payment is routed to the ERC-8004 identity owner (`ownerOf(agentId)`), not the agent wallet. This allows a single owner to operate multiple agent wallets while receiving all payouts to one address.
 
 **Reputation feedback on settlement**
 
-Every settled job (manual or auto) automatically submits a proof-of-payment signal to ERC-8004 via `giveFeedback`. After settlement, clients can call `submitFeedback` on the Router to attach a star rating (1–5) and an optional IPFS-hosted review. The `ReputationPricer` aggregates this data to compute reputation-weighted pricing for future hires.
+Every settled job automatically submits a proof-of-payment signal to ERC-8004 via `giveFeedback`. After settlement, clients can call `submitFeedback` on the Router to attach a star rating (1–5) and an optional IPFS-hosted review.
 
 **Protocol fee**
 
@@ -172,33 +166,25 @@ XcrowRouter(router).hireAgentByWalletWithPermit(
     amount,         // USDC amount (6 decimals)
     taskHash,       // keccak256(abi.encodePacked(taskDescription))
     deadline,       // block.timestamp + duration in seconds
-    erc8004AgentId, // ERC-8004 token ID for reputation tracking (0 if unknown)
+    erc8004AgentId, // ERC-8004 token ID for reputation tracking
     permitDeadline, // permit signature expiry
     v, r, s         // EIP-2612 permit signature components
 );
 ```
 
-### Submit Proof of Work (agent)
+### Platform auto-settlement (recommended)
 
 ```solidity
-// Agent calls after completeJob to anchor output hash on-chain
-// proofHash = keccak256(outputContent) — e.g., hash of the IPFS CID or raw output
-XcrowEscrow(escrow).submitProofOfWork(jobId, proofHash);
-// Starts the 48h settlement window
-```
-
-### Trustless auto-settlement (after challenge window)
-
-```solidity
-// Anyone calls after the 48h window elapses — agent calls to claim payment
-XcrowRouter(router).autoSettleViaRouter(jobId);
-// Reverts if: window not elapsed, no PoW submitted, or job was disputed
+// Platform server calls after agent delivers output — atomic complete + settle
+// Only callable by the contract owner
+XcrowEscrow(escrow).completeAndSettle(jobId);
+// Pays the agent owner instantly, deducts protocol fee
 ```
 
 ### Release payment (manual, client)
 
 ```solidity
-// Client can settle at any time after completeJob — no PoW required
+// Client can settle at any time after completeJob
 XcrowRouter(router).settleAndPay(
     jobId,
     0,   // destinationDomain: 0 for same-chain settlement
@@ -238,16 +224,14 @@ uint256[] memory jobIds = XcrowEscrow(escrow).getAgentWalletJobs(agentWallet);
 
 ## TypeScript Integration (viem / wagmi)
 
-The examples below show how to integrate Xcrow in a TypeScript frontend using viem and wagmi. The full ABIs are in `src/core/`.
-
 ### Setup
 
 ```typescript
 import { createPublicClient, createWalletClient, http, parseUnits, keccak256, encodePacked } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-const XCROW_ROUTER   = "0x2EE65b29Fb04F59263b3A902cD3205C62e3a0231";
-const XCROW_ESCROW   = "0x183B77E415931335ac746e59c17E88d1279a241f";
+const XCROW_ROUTER   = "0xb8b5d656660d2Cde7CDebAEbcb0bD4e5A153B887";
+const XCROW_ESCROW   = "0x165a9040dC9C31be0bDeEd142a63Dd0210998F4D";
 const USDC_ADDRESS   = "0x3600000000000000000000000000000000000000";
 const ARC_CHAIN_ID   = 5042002;
 
@@ -263,7 +247,7 @@ const amount       = parseUnits("10", 6);              // 10 USDC
 const taskHash     = keccak256(encodePacked(["string"], ["Summarise this document"]));
 const deadline     = BigInt(Math.floor(Date.now() / 1000) + 86400); // 24h from now
 const agentWallet  = "0xAgentWalletAddress";
-const erc8004Id    = BigInt(0); // pass ERC-8004 token ID if known
+const erc8004Id    = BigInt(377); // ERC-8004 token ID
 
 // 1. Read USDC nonce for permit
 const nonce = await publicClient.readContract({
@@ -300,6 +284,23 @@ const txHash = await walletClient.writeContract({
 });
 ```
 
+### Platform auto-settlement (server-side)
+
+```typescript
+// Platform server calls after agent delivers output
+const account = privateKeyToAccount(process.env.ARC_PRIVATE_KEY as `0x${string}`);
+const wallet = createWalletClient({ account, chain: arc, transport: http() });
+
+const tx = await wallet.writeContract({
+  address: XCROW_ESCROW,
+  abi: xcrowEscrowAbi,
+  functionName: "completeAndSettle",
+  args: [jobId],
+});
+await publicClient.waitForTransactionReceipt({ hash: tx });
+// Agent owner receives USDC instantly
+```
+
 ### Read job state
 
 ```typescript
@@ -313,47 +314,6 @@ const job = await publicClient.readContract({
 // job.status:
 // 0 = Created   1 = Accepted   2 = InProgress  3 = Completed
 // 4 = Settled   5 = Disputed   6 = Cancelled   7 = Refunded   8 = Expired
-```
-
-### Submit Proof of Work (agent)
-
-```typescript
-import { keccak256, toBytes } from "viem";
-
-// Hash the output content (or IPFS CID string)
-const proofHash = keccak256(toBytes(outputContent));
-
-// Call directly on escrow — msg.sender must be agentWallet
-await walletClient.writeContract({
-  address: XCROW_ESCROW,
-  abi: xcrowEscrowAbi,
-  functionName: "submitProofOfWork",
-  args: [jobId, proofHash],
-});
-// Starts 48h challenge window
-```
-
-### Trustless auto-settlement (after 48h window)
-
-```typescript
-// Anyone can call — agent calls to claim payment after window elapses
-await walletClient.writeContract({
-  address: XCROW_ROUTER,
-  abi: xcrowRouterAbi,
-  functionName: "autoSettleViaRouter",
-  args: [jobId],
-});
-```
-
-### Settle and release payment (client, manual)
-
-```typescript
-await walletClient.writeContract({
-  address: XCROW_ROUTER,
-  abi: xcrowRouterAbi,
-  functionName: "settleAndPay",
-  args: [jobId, 0, "0x"], // destinationDomain=0 for same-chain
-});
 ```
 
 ### Read all jobs for an agent wallet
@@ -425,14 +385,13 @@ ARC_RPC_URL=https://rpc.testnet.arc.network
 - All state-changing functions use `ReentrancyGuard`
 - USDC transfers use `SafeERC20` throughout
 - The Router and Escrow are independently `Pausable` for emergency stops
-- `acceptJob`, `startJob`, and `completeJob` are gated to the assigned `agentWallet`
+- `completeAndSettle` is restricted to the contract owner (platform) via `onlyOwner`
+- `completeJob` is gated to the assigned `agentWallet`
 - Cancellations, rejections, and refunds are routed through the `originalClient` mapping to prevent USDC from being stranded in the Router
-- `rejectJob` in the escrow has no auth check — authentication is enforced by the Router in `rejectJobViaRouter` before the call
 - `CrossChainSettler.settleCrossChain` is restricted to authorised callers
 - Dispute resolution is owner-arbitrated with a configurable timeout for automatic client refund
-- `submitProofOfWork` can only be called by the assigned `agentWallet` and only once per job
-- `autoSettle` checks that PoW was submitted and the full `settlementWindow` has elapsed; if the client disputes before the window closes, `autoSettle` is permanently blocked for that job
-- ERC-8004 `giveFeedback` calls in `settleAndPay` and `autoSettleViaRouter` are wrapped in `try/catch` so a registry failure never blocks settlement
+- Payouts are routed to the agent owner (`ownerOf(agentId)`) via ERC-8004, not to arbitrary addresses
+- ERC-8004 `giveFeedback` calls in settlement are wrapped in `try/catch` so a registry failure never blocks settlement
 
 ---
 
